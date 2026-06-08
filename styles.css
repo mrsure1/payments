@@ -539,17 +539,11 @@ body.light-theme .expense-table tbody tr:hover {
     font-weight: 500;
 }
 
-/* 2단 분석 그리드 */
+/* 3단 분석 그리드 (차트, 구글 동기화, 과거 기록) */
 .sub-analysis-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 24px;
-}
-
-@media (max-width: 640px) {
-    .sub-analysis-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 /* 과거 저장 기록 목록 */
@@ -638,3 +632,280 @@ body.light-theme .expense-table tbody tr:hover {
 .hidden {
     display: none !important;
 }
+
+/* ==========================================================================
+   구글 드라이브 동기화 관련 스타일
+   ========================================================================== */
+.drive-sync-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.drive-sync-content {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    flex: 1;
+}
+
+.drive-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.drive-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: auto;
+}
+
+/* 뱃지 상태 컬러 */
+.disconnect-badge {
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.connect-badge {
+    color: var(--success-color);
+    background: var(--success-bg);
+}
+
+/* 구글 테마 버튼 */
+.google-btn {
+    background: #ffffff;
+    color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: var(--border-radius-md);
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: var(--transition-fast);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.google-btn:hover {
+    background: #f9fafb;
+    border-color: #c5c7c9;
+    transform: translateY(-1px);
+}
+
+.danger-btn {
+    background: var(--danger-color);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--border-radius-md);
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: var(--transition-fast);
+}
+
+.danger-btn:hover {
+    background: var(--danger-hover);
+    transform: translateY(-1px);
+}
+
+/* 백업/복원 버튼 레이아웃 */
+.backup-restore-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.sync-op-btn {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text-primary);
+    border-radius: var(--border-radius-md);
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: var(--transition-fast);
+}
+
+.sync-op-btn:hover {
+    border-color: var(--accent-color);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+/* 설정 링크 버튼 */
+.settings-link-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 14px;
+    padding: 6px 0;
+    transition: var(--transition-fast);
+    align-self: center;
+}
+
+.settings-link-btn:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+}
+
+/* ==========================================================================
+   설정 모달 스타일
+   ========================================================================== */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 1;
+    transition: opacity var(--transition-normal);
+}
+
+.modal-content {
+    width: 90%;
+    max-width: 480px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--card-border);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 28px;
+    animation: modalSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes modalSlideIn {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--card-border);
+    padding-bottom: 14px;
+}
+
+.modal-header h3 {
+    font-family: var(--font-heading);
+    font-size: 1.15rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.close-modal-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.75rem;
+    cursor: pointer;
+    line-height: 1;
+    transition: var(--transition-fast);
+}
+
+.close-modal-btn:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.modal-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-group label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.form-group input {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text-primary);
+    border-radius: var(--border-radius-md);
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: var(--transition-fast);
+}
+
+.form-group input:focus {
+    border-color: var(--accent-color);
+}
+
+.settings-guide {
+    font-size: 0.8rem;
+}
+
+.guide-link {
+    color: var(--accent-color);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+}
+
+.guide-link:hover {
+    text-decoration: underline;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid var(--card-border);
+    padding-top: 16px;
+}
+
+.modal-footer .primary-btn {
+    padding: 10px 24px;
+}
+

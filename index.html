@@ -16,6 +16,10 @@
     <!-- 차트 시각화를 위한 Chart.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+    <!-- Google 드라이브 연동을 위한 API 및 Identity SDK 로드 -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
     <!-- 스타일시트 로드 -->
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -124,7 +128,7 @@
                     </div>
                 </div>
 
-                <!-- 하단 2단 그리드: 카테고리 비중 및 과거 저장 목록 -->
+                <!-- 하단 3단 그리드: 카테고리 비중, 구글 드라이브 연동, 과거 저장 목록 -->
                 <div class="sub-analysis-grid">
                     
                     <!-- 카테고리 비중 도넛 차트 -->
@@ -139,6 +143,44 @@
                             <canvas id="ratioChart"></canvas>
                             <div id="no-data-msg" class="no-data-msg hidden">입력된 지출 내역이 없습니다.</div>
                         </div>
+                    </div>
+
+                    <!-- 구글 드라이브 동기화 카드 -->
+                    <div class="card drive-sync-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i data-lucide="cloud" class="title-icon"></i>
+                                <h2>구글 드라이브 동기화</h2>
+                            </div>
+                            <span class="status-badge disconnect-badge" id="drive-status">연결 해제됨</span>
+                        </div>
+                        <div class="drive-sync-content">
+                            <p class="drive-desc">지출 데이터를 구글 드라이브에 안전하게 백업하고 복원하세요.</p>
+                            <div class="drive-actions">
+                                <button id="google-login-btn" class="google-btn">
+                                    <i data-lucide="log-in"></i>
+                                    구글 로그인
+                                </button>
+                                <button id="google-logout-btn" class="danger-btn hidden">
+                                    <i data-lucide="log-out"></i>
+                                    로그아웃
+                                </button>
+                                <div class="backup-restore-group hidden" id="drive-ops-group">
+                                    <button id="drive-backup-btn" class="sync-op-btn">
+                                        <i data-lucide="upload-cloud"></i>
+                                        드라이브 백업
+                                    </button>
+                                    <button id="drive-restore-btn" class="sync-op-btn">
+                                        <i data-lucide="download-cloud"></i>
+                                        드라이브 복원
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button id="open-settings-btn" class="settings-link-btn">
+                            <i data-lucide="settings"></i>
+                            API 연동 설정
+                        </button>
                     </div>
 
                     <!-- 과거 저장 내역 목록 -->
@@ -166,6 +208,37 @@
         <footer class="main-footer">
             <p>© 2026 스마트 소비 분석기. All rights reserved.</p>
         </footer>
+    </div>
+
+    <!-- API 연동 설정 모달 창 -->
+    <div id="api-settings-modal" class="modal-overlay hidden">
+        <div class="modal-content card">
+            <div class="modal-header">
+                <h3><i data-lucide="settings" class="title-icon"></i> 구글 API 연동 설정</h3>
+                <button id="close-settings-btn" class="close-modal-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">
+                    본인의 구글 드라이브에 안전하게 데이터를 백업하기 위해 구글 클라우드 콘솔에서 발급받은 API 정보를 입력해 주세요. (발급 방법은 README.md를 참조하세요)
+                </p>
+                <div class="form-group">
+                    <label for="settings-client-id">OAuth 2.0 클라이언트 ID (Client ID)</label>
+                    <input type="text" id="settings-client-id" placeholder="xxxx.apps.googleusercontent.com">
+                </div>
+                <div class="form-group">
+                    <label for="settings-api-key">API Key (선택사항 - 파일 로드 시 검색 속도 향상)</label>
+                    <input type="password" id="settings-api-key" placeholder="AIzaSy...">
+                </div>
+                <div class="settings-guide">
+                    <a href="https://console.cloud.google.com/" target="_blank" class="guide-link">
+                        <i data-lucide="external-link"></i> 구글 클라우드 콘솔 바로가기
+                    </a>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-settings-btn" class="primary-btn">설정 저장</button>
+            </div>
+        </div>
     </div>
 
     <!-- 비즈니스 로직 스크립트 로드 -->
