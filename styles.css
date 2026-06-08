@@ -1018,4 +1018,53 @@ body.light-theme .expense-table tbody tr:hover {
     }
 }
 
+/* ==========================================================================
+   테이블 드래그 앤 드롭(Drag & Drop) 관련 스타일
+   ========================================================================== */
+.expense-table tbody tr {
+    position: relative;
+    cursor: default;
+}
+
+/* 드래그 핸들 (⋮⋮) 스타일 */
+.drag-handle {
+    cursor: grab;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin: 0 auto;
+    border-radius: var(--border-radius-sm);
+    transition: var(--transition-fast);
+}
+
+.drag-handle:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+body.light-theme .drag-handle:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+/* 드래그 중인 행 상태 (유령 상태) */
+.expense-table tbody tr.dragging {
+    opacity: 0.4;
+    background: rgba(99, 102, 241, 0.15) !important;
+    border: 1px dashed var(--accent-color);
+}
+
+/* 드롭 타겟 호버 라인 상태 */
+.expense-table tbody tr.drag-over {
+    background: rgba(99, 102, 241, 0.08) !important;
+    border-top: 2px solid var(--accent-color);
+}
+
+
 

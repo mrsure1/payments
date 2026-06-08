@@ -138,12 +138,20 @@ function renderExpenseList() {
     
     state.items.forEach((item) => {
         const tr = document.createElement("tr");
+        // 기본적으로 draggable은 false로 지정하고 핸들 mousedown 시 활성화
+        tr.setAttribute("draggable", "false");
+        tr.setAttribute("data-item-name", item);
         
         // 해당 항목의 금액 (없으면 0 또는 빈 칸으로 노출할 수 있으나, 0원으로 기본값 설정)
         const amount = monthData[item] !== undefined ? monthData[item] : 0;
         const formattedAmount = formatNumberWithCommas(amount);
         
         tr.innerHTML = `
+            <td style="text-align: center; vertical-align: middle;">
+                <div class="drag-handle" aria-label="순서 조정 핸들">
+                    <i data-lucide="grip-vertical"></i>
+                </div>
+            </td>
             <td><span class="expense-item-name">${escapeHtml(item)}</span></td>
             <td>
                 <div class="expense-input-wrapper">
@@ -167,6 +175,7 @@ function renderExpenseList() {
     // 새로 렌더링된 요소에 대해 Lucide 아이콘 및 지출 입력 이벤트 핸들링 바인딩
     lucide.createIcons();
     bindExpenseInputs();
+    bindExpenseDragEvents(); // 드래그 앤 드롭 정렬 이벤트 바인딩 추가
 }
 
 // 과거에 저장한 월별 내역 리스트 렌더링
@@ -1068,4 +1077,103 @@ function applyRestoredData(payload) {
     renderAll();
     updateCharts();
 }
+
+// ==========================================================================
+// 9. 테이블 행 드래그 앤 드롭(Drag & Drop) 순서 정렬
+// ==========================================================================
+
+// 지출 항목 테이블 행들의 HTML5 드래그 앤 드롭 리스너 바인딩
+function bindExpenseDragEvents() {
+    const tableBody = document.getElementById("expense-list");
+    if (!tableBody) return;
+
+    const rows = tableBody.querySelectorAll("tr");
+    let draggedRow = null;
+
+    rows.forEach(row => {
+        const handle = row.querySelector(".drag-handle");
+
+        // 1) 드래그 핸들 mousedown 시에만 행을 드래그 가능하게 활성화 (인풋 오작동 방지)
+        if (handle) {
+            handle.addEventListener("mousedown", () => {
+                row.setAttribute("draggable", "true");
+            });
+            handle.addEventListener("mouseup", () => {
+                row.setAttribute("draggable", "false");
+            });
+        }
+
+        // 2) dragstart: 드래그가 시작될 때
+        row.addEventListener("dragstart", (e) => {
+            draggedRow = row;
+            row.classList.add("dragging");
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", row.getAttribute("data-item-name"));
+        });
+
+        // 3) dragover: 다른 행 위로 지나갈 때
+        row.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            if (row === draggedRow) return;
+
+            // 마우스 포인터의 세로 좌표를 기준으로 위/아래 판정해 가이드라인 그리기
+            const rect = row.getBoundingClientRect();
+            const midpoint = rect.top + rect.height / 2;
+            
+            if (e.clientY < midpoint) {
+                row.classList.add("drag-over");
+            } else {
+                row.classList.remove("drag-over");
+            }
+        });
+
+        // 4) dragleave: 마우스가 행을 벗어날 때
+        row.addEventListener("dragleave", () => {
+            row.classList.remove("drag-over");
+        });
+
+        // 5) drop: 행을 떨어뜨려 순서를 변경할 때
+        row.addEventListener("drop", (e) => {
+            e.preventDefault();
+            row.classList.remove("drag-over");
+            
+            if (!draggedRow || draggedRow === row) return;
+
+            const draggedName = draggedRow.getAttribute("data-item-name");
+            const targetName = row.getAttribute("data-item-name");
+
+            const draggedIndex = state.items.indexOf(draggedName);
+            const targetIndex = state.items.indexOf(targetName);
+
+            if (draggedIndex !== -1 && targetIndex !== -1) {
+                // 현재 인풋 창의 최신 값들을 메모리에 먼저 적재
+                saveCurrentInputsToMemory();
+
+                // 배열 내 위치 교체 수행 (dragged 인덱스를 지우고 target 인덱스에 밀어넣음)
+                state.items.splice(draggedIndex, 1);
+                state.items.splice(targetIndex, 0, draggedName);
+
+                // 바뀐 스키마를 로컬 스토리지에 동기화
+                localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
+                
+                // 화면 재렌더링
+                renderAll();
+                updateCharts();
+                
+                showSaveStatus("항목 순서가 변경되었습니다.");
+            }
+        });
+
+        // 6) dragend: 드래그가 취소되거나 완료되어 끝날 때
+        row.addEventListener("dragend", () => {
+            row.classList.remove("dragging");
+            rows.forEach(r => {
+                r.classList.remove("drag-over");
+                r.setAttribute("draggable", "false"); // 원상태 복귀
+            });
+            draggedRow = null;
+        });
+    });
+}
+
 
