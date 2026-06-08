@@ -138,8 +138,8 @@ function renderExpenseList() {
     
     state.items.forEach((item) => {
         const tr = document.createElement("tr");
-        // 기본적으로 draggable은 false로 지정하고 핸들 mousedown 시 활성화
-        tr.setAttribute("draggable", "false");
+        // 드래그 앤 드롭 제어를 위해 항상 draggable="true"로 설정
+        tr.setAttribute("draggable", "true");
         tr.setAttribute("data-item-name", item);
         
         // 해당 항목의 금액 (없으면 0 또는 빈 칸으로 노출할 수 있으나, 0원으로 기본값 설정)
@@ -1082,6 +1082,9 @@ function applyRestoredData(payload) {
 // 9. 테이블 행 드래그 앤 드롭(Drag & Drop) 순서 정렬
 // ==========================================================================
 
+// 드래그 핸들 클릭 여부를 판별하기 위한 글로벌 상태 플래그
+let isHandleClicked = false;
+
 // 지출 항목 테이블 행들의 HTML5 드래그 앤 드롭 리스너 바인딩
 function bindExpenseDragEvents() {
     const tableBody = document.getElementById("expense-list");
@@ -1093,30 +1096,43 @@ function bindExpenseDragEvents() {
     rows.forEach(row => {
         const handle = row.querySelector(".drag-handle");
 
-        // 1) 드래그 핸들 mousedown 시에만 행을 드래그 가능하게 활성화 (인풋 오작동 방지)
+        // 1) 드래그 핸들을 누르는 시점에만 드래그를 허용하기 위해 플래그 설정 (인풋 필드 오작동 차단)
         if (handle) {
             handle.addEventListener("mousedown", () => {
-                row.setAttribute("draggable", "true");
+                isHandleClicked = true;
             });
             handle.addEventListener("mouseup", () => {
-                row.setAttribute("draggable", "false");
+                isHandleClicked = false;
             });
+            
+            // 모바일 및 터치 디바이스 오작동 대응
+            handle.addEventListener("touchstart", () => {
+                isHandleClicked = true;
+            }, { passive: true });
+            handle.addEventListener("touchend", () => {
+                isHandleClicked = false;
+            }, { passive: true });
         }
 
-        // 2) dragstart: 드래그가 시작될 때
+        // 2) dragstart: 드래그 제스처가 시작될 때
         row.addEventListener("dragstart", (e) => {
+            // 드래그 핸들을 클릭해 잡은 상태가 아니라면 브라우저의 기본 드래그 동작을 원천 차단
+            if (!isHandleClicked) {
+                e.preventDefault();
+                return;
+            }
             draggedRow = row;
             row.classList.add("dragging");
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("text/plain", row.getAttribute("data-item-name"));
         });
 
-        // 3) dragover: 다른 행 위로 지나갈 때
+        // 3) dragover: 다른 행 위로 마우스가 지나갈 때
         row.addEventListener("dragover", (e) => {
             e.preventDefault();
             if (row === draggedRow) return;
 
-            // 마우스 포인터의 세로 좌표를 기준으로 위/아래 판정해 가이드라인 그리기
+            // 마우스 포인터의 세로 위치를 체크해 드롭 삽입 가이드를 시각화
             const rect = row.getBoundingClientRect();
             const midpoint = rect.top + rect.height / 2;
             
@@ -1127,12 +1143,12 @@ function bindExpenseDragEvents() {
             }
         });
 
-        // 4) dragleave: 마우스가 행을 벗어날 때
+        // 4) dragleave: 마우스가 행 영역을 벗어날 때
         row.addEventListener("dragleave", () => {
             row.classList.remove("drag-over");
         });
 
-        // 5) drop: 행을 떨어뜨려 순서를 변경할 때
+        // 5) drop: 특정 행 위에 행을 떨어뜨렸을 때
         row.addEventListener("drop", (e) => {
             e.preventDefault();
             row.classList.remove("drag-over");
@@ -1146,17 +1162,17 @@ function bindExpenseDragEvents() {
             const targetIndex = state.items.indexOf(targetName);
 
             if (draggedIndex !== -1 && targetIndex !== -1) {
-                // 현재 인풋 창의 최신 값들을 메모리에 먼저 적재
+                // 현재 테이블에 적힌 최신 금액들을 메모리에 동기화
                 saveCurrentInputsToMemory();
 
-                // 배열 내 위치 교체 수행 (dragged 인덱스를 지우고 target 인덱스에 밀어넣음)
+                // 배열 내 인덱스 재배치 (기존 위치 삭제 후 새로운 타겟 인덱스에 삽입)
                 state.items.splice(draggedIndex, 1);
                 state.items.splice(targetIndex, 0, draggedName);
 
-                // 바뀐 스키마를 로컬 스토리지에 동기화
+                // 순서 스키마 로컬 스토리지 보존
                 localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
                 
-                // 화면 재렌더링
+                // 테이블 리렌더링 및 차트 갱신
                 renderAll();
                 updateCharts();
                 
@@ -1164,14 +1180,14 @@ function bindExpenseDragEvents() {
             }
         });
 
-        // 6) dragend: 드래그가 취소되거나 완료되어 끝날 때
+        // 6) dragend: 드래그 액션이 취소되거나 끝났을 때
         row.addEventListener("dragend", () => {
             row.classList.remove("dragging");
             rows.forEach(r => {
                 r.classList.remove("drag-over");
-                r.setAttribute("draggable", "false"); // 원상태 복귀
             });
             draggedRow = null;
+            isHandleClicked = false; // 플래그 안전 해제
         });
     });
 }
