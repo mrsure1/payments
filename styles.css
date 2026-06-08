@@ -210,6 +210,11 @@ body.light-theme #theme-toggle .moon-icon {
     flex: 1;
 }
 
+/* 그리드 아이템 내 캔버스 등으로 인해 리사이즈 시 찌그러진 상태가 유지되는 현상 방지 */
+.dashboard-grid > section {
+    min-width: 0;
+}
+
 @media (max-width: 1024px) {
     .dashboard-grid {
         grid-template-columns: 1fr;
@@ -908,4 +913,109 @@ body.light-theme .expense-table tbody tr:hover {
 .modal-footer .primary-btn {
     padding: 10px 24px;
 }
+
+/* ==========================================================================
+   모바일 & 태블릿 반응형 미디어 쿼리 최적화
+   ========================================================================== */
+@media (max-width: 768px) {
+    .app-container {
+        padding: 12px;
+        gap: 16px;
+    }
+    
+    .card {
+        padding: 16px;
+        gap: 16px;
+    }
+    
+    .main-header {
+        padding: 12px 18px;
+    }
+    
+    .header-logo h1 {
+        font-size: 1.25rem;
+    }
+    
+    .month-selector span {
+        font-size: 0.9rem;
+        min-width: 90px;
+    }
+    
+    .total-amount {
+        font-size: 1.6rem;
+    }
+}
+
+@media (max-width: 640px) {
+    .main-header {
+        flex-direction: column;
+        gap: 14px;
+        align-items: center;
+        text-align: center;
+    }
+    
+    .header-controls {
+        width: 100%;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    
+    .month-selector {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    /* 지출 추가 폼 세로 정렬 */
+    .add-item-form {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .add-item-form .primary-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    /* 테이블 모바일 가독성 개선 */
+    .expense-table th, .expense-table td {
+        padding: 10px 6px;
+        font-size: 0.85rem;
+    }
+    
+    .expense-input-wrapper {
+        max-width: 120px;
+    }
+    
+    .expense-input {
+        padding: 6px 22px 6px 6px;
+        font-size: 0.85rem;
+    }
+    
+    .input-suffix {
+        right: 6px;
+        font-size: 0.75rem;
+    }
+    
+    /* 3단 그리드 내 카드 패딩 */
+    .sub-analysis-grid {
+        gap: 16px;
+    }
+    
+    /* 과거 목록 버튼 모바일 대응 */
+    .history-item {
+        padding: 8px 10px;
+    }
+    
+    .history-month {
+        font-size: 0.85rem;
+    }
+    
+    .view-history-btn {
+        padding: 4px 8px;
+        font-size: 0.7rem;
+    }
+}
+
 
