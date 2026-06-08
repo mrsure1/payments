@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스마트 소비 분석기 | 매월 지출 및 비용 관리</title>
+    
+    <!-- 모던 타이포그래피를 위한 Google Fonts 로드 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- 아이콘 표시를 위한 Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- 차트 시각화를 위한 Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- 스타일시트 로드 -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- 상단 헤더 영역 -->
+        <header class="main-header">
+            <div class="header-logo">
+                <i data-lucide="wallet" class="logo-icon"></i>
+                <h1>스마트 소비 분석기</h1>
+            </div>
+            
+            <div class="header-controls">
+                <!-- 월 선택 컨트롤 -->
+                <div class="month-selector">
+                    <button id="prev-month-btn" class="icon-btn" aria-label="이전 달">
+                        <i data-lucide="chevron-left"></i>
+                    </button>
+                    <span id="current-month-display">2026년 06월</span>
+                    <input type="month" id="month-picker" class="hidden-picker" value="2026-06">
+                    <button id="next-month-btn" class="icon-btn" aria-label="다음 달">
+                        <i data-lucide="chevron-right"></i>
+                    </button>
+                </div>
+                
+                <!-- 테마 토글 버튼 -->
+                <button id="theme-toggle" class="icon-btn" aria-label="테마 변경">
+                    <i data-lucide="sun" class="sun-icon"></i>
+                    <i data-lucide="moon" class="moon-icon"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- 대시보드 그리드 영역 -->
+        <main class="dashboard-grid">
+            
+            <!-- 좌측: 지출 입력 및 관리 섹션 -->
+            <section class="card spending-section">
+                <div class="card-header">
+                    <div class="card-title">
+                        <i data-lucide="credit-card" class="title-icon"></i>
+                        <h2>지출 입력 및 관리</h2>
+                    </div>
+                    <span class="status-badge" id="save-status">자동 저장 완료</span>
+                </div>
+
+                <!-- 신규 지출 항목 추가 폼 -->
+                <form id="add-item-form" class="add-item-form">
+                    <div class="input-group">
+                        <i data-lucide="plus-circle" class="input-icon"></i>
+                        <input type="text" id="new-item-name" placeholder="예: 넷플릭스, 관리비 등 항목 추가" required>
+                    </div>
+                    <button type="submit" class="primary-btn">
+                        <i data-lucide="plus"></i>
+                        항목 추가
+                    </button>
+                </form>
+
+                <!-- 지출 항목 입력 테이블 -->
+                <div class="table-container">
+                    <table class="expense-table">
+                        <thead>
+                            <tr>
+                                <th>지출 항목</th>
+                                <th>금액 (원)</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expense-list">
+                            <!-- Javascript를 통해 지출 내역 항목들이 여기에 렌더링됩니다 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 실시간 합계 금액 표시 요약 카드 -->
+                <div class="total-summary-card">
+                    <div class="total-label">이번 달 총 지출</div>
+                    <div class="total-amount-container">
+                        <span id="total-amount-display" class="total-amount">0</span>
+                        <span class="currency">원</span>
+                    </div>
+                </div>
+
+                <!-- 데이터 저장 버튼 -->
+                <div class="action-footer">
+                    <button id="save-data-btn" class="gradient-btn">
+                        <i data-lucide="save"></i>
+                        이번 달 지출 데이터 저장하기
+                    </button>
+                </div>
+            </section>
+
+            <!-- 우측: 분석 및 보고서 섹션 -->
+            <section class="analysis-section">
+                
+                <!-- 상단 차트: 월별 소비 추이 (라인 차트) -->
+                <div class="card chart-card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <i data-lucide="trending-up" class="title-icon"></i>
+                            <h2>월별 지출 트렌드</h2>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 하단 2단 그리드: 카테고리 비중 및 과거 저장 목록 -->
+                <div class="sub-analysis-grid">
+                    
+                    <!-- 카테고리 비중 도넛 차트 -->
+                    <div class="card chart-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i data-lucide="pie-chart" class="title-icon"></i>
+                                <h2>지출 카테고리 비중</h2>
+                            </div>
+                        </div>
+                        <div class="chart-container doughnut-container">
+                            <canvas id="ratioChart"></canvas>
+                            <div id="no-data-msg" class="no-data-msg hidden">입력된 지출 내역이 없습니다.</div>
+                        </div>
+                    </div>
+
+                    <!-- 과거 저장 내역 목록 -->
+                    <div class="card history-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i data-lucide="folder-archive" class="title-icon"></i>
+                                <h2>과거 저장 목록</h2>
+                            </div>
+                        </div>
+                        <div class="history-list-container">
+                            <ul id="history-list" class="history-list">
+                                <!-- 과거에 저장된 달 데이터 목록이 여기에 렌더링됩니다 -->
+                            </ul>
+                        </div>
+                    </div>
+
+                </div>
+
+            </section>
+
+        </main>
+        
+        <!-- 하단 푸터 영역 -->
+        <footer class="main-footer">
+            <p>© 2026 스마트 소비 분석기. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <!-- 비즈니스 로직 스크립트 로드 -->
+    <script src="app.js"></script>
+</body>
+</html>
