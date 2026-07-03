@@ -152,7 +152,7 @@ function renderExpenseList() {
                     <i data-lucide="grip-vertical"></i>
                 </div>
             </td>
-            <td><span class="expense-item-name">${escapeHtml(item)}</span></td>
+            <td><span class="expense-item-name" data-item-name="${escapeHtml(item)}" title="클릭하여 항목명 수정">${escapeHtml(item)}</span></td>
             <td>
                 <div class="expense-input-wrapper">
                     <input type="text" 
@@ -175,6 +175,7 @@ function renderExpenseList() {
     // 새로 렌더링된 요소에 대해 Lucide 아이콘 및 지출 입력 이벤트 핸들링 바인딩
     lucide.createIcons();
     bindExpenseInputs();
+    bindItemNameEdit();      // 항목명 클릭 인라인 편집 이벤트 바인딩 추가
     bindExpenseDragEvents(); // 드래그 앤 드롭 정렬 이벤트 바인딩 추가
 }
 
@@ -294,6 +295,117 @@ function bindExpenseInputs() {
             }
         });
     });
+}
+
+// 지출 항목명 클릭 시 인라인 편집 기능 바인딩
+function bindItemNameEdit() {
+    const nameSpans = document.querySelectorAll(".expense-item-name");
+
+    nameSpans.forEach(span => {
+        span.addEventListener("click", () => {
+            const oldName = span.getAttribute("data-item-name");
+            startInlineNameEdit(span, oldName);
+        });
+    });
+}
+
+// 항목명 span을 입력창으로 전환하여 즉석에서 이름을 수정하도록 처리
+function startInlineNameEdit(span, oldName) {
+    // 이미 편집 입력창으로 전환된 상태라면 중복 실행 방지
+    if (span.classList.contains("editing")) return;
+    span.classList.add("editing");
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "item-name-edit-input";
+    input.value = oldName;
+    input.setAttribute("aria-label", "지출 항목명 수정");
+
+    // 화면상에서 span 자리에 입력창을 대신 표시
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let finished = false; // 커밋/취소 중복 호출 방지 플래그
+
+    // 변경 내용 확정 처리
+    const commit = () => {
+        if (finished) return;
+        finished = true;
+        const newName = input.value.trim();
+        // 이름이 실제로 바뀌었을 때만 적용, 그 외에는 원상 복구
+        if (newName && newName !== oldName) {
+            const success = renameExpenseItem(oldName, newName);
+            if (!success) {
+                // 중복 등으로 실패한 경우 화면을 원래 목록으로 되돌림
+                renderExpenseList();
+            }
+            // 성공 시 renameExpenseItem 내부에서 이미 renderAll 수행됨
+        } else {
+            renderExpenseList();
+        }
+    };
+
+    // 편집 취소 (원래 이름 유지)
+    const cancel = () => {
+        if (finished) return;
+        finished = true;
+        renderExpenseList();
+    };
+
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+        }
+    });
+
+    input.addEventListener("blur", commit);
+}
+
+// 지출 항목 이름 변경 (모든 월별 데이터의 키도 함께 갱신하여 금액 보존)
+function renameExpenseItem(oldName, newName) {
+    // 중복 이름 검사
+    if (state.items.includes(newName)) {
+        alert("이미 존재하는 지출 항목 이름입니다.");
+        return false;
+    }
+
+    const idx = state.items.indexOf(oldName);
+    if (idx === -1) return false;
+
+    // 이름 변경 전, 현재 화면에 입력된 금액을 메모리에 동기화 (구 이름 기준으로 보존)
+    saveCurrentInputsToMemory();
+
+    // 1) 항목 목록의 순서를 유지한 채 이름만 교체
+    state.items[idx] = newName;
+    localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
+
+    // 2) 모든 월별 데이터에서 해당 항목의 키를 새 이름으로 변경 (입력 순서 보존)
+    Object.keys(state.data).forEach(month => {
+        const monthData = state.data[month];
+        if (monthData && Object.prototype.hasOwnProperty.call(monthData, oldName)) {
+            const rebuilt = {};
+            Object.keys(monthData).forEach(key => {
+                if (key === oldName) {
+                    rebuilt[newName] = monthData[oldName];
+                } else {
+                    rebuilt[key] = monthData[key];
+                }
+            });
+            state.data[month] = rebuilt;
+        }
+    });
+    localStorage.setItem("expense_data", JSON.stringify(state.data));
+
+    // 전체 갱신
+    renderAll();
+    updateCharts();
+    showSaveStatus("항목 이름이 변경되었습니다.");
+    return true;
 }
 
 // 과거 저장 기록들에 대한 불러오기 및 삭제 액션 바인딩
@@ -659,10 +771,7 @@ function initChartInstances() {
             labels: [],
             datasets: [{
                 data: [],
-                backgroundColor: [
-                    '#6366f1', '#a855f7', '#ec4899', '#f43f5e', 
-                    '#10b981', '#f59e0b', '#3b82f6', '#06b6d4'
-                ],
+                backgroundColor: [...CHART_PALETTE],
                 borderWidth: state.theme === "dark" ? 2 : 1,
                 borderColor: state.theme === "dark" ? '#1e293b' : '#ffffff'
             }]
@@ -713,17 +822,21 @@ function updateCharts() {
     state.charts.trend.update();
 
     // 2) 도넛 차트 업데이트 (현재 선택된 월의 지출 카테고리 비중)
+    // 항목명의 괄호 앞부분을 카테고리로 묶어 합산합니다.
+    // 예) "보험(삼성생명)", "보험(메리츠)" -> "보험" 하나의 카테고리로 집계
     const monthData = state.data[state.currentMonth] || {};
-    const labels = [];
-    const values = [];
-    
+    const categoryTotals = {};
+
     Object.keys(monthData).forEach(item => {
         const val = monthData[item] || 0;
         if (val > 0) { // 0원인 항목은 시각화 왜곡 방지를 위해 노출 안함
-            labels.push(item);
-            values.push(val);
+            const category = getCategoryFromItemName(item);
+            categoryTotals[category] = (categoryTotals[category] || 0) + val;
         }
     });
+
+    const labels = Object.keys(categoryTotals);
+    const values = labels.map(label => categoryTotals[label]);
 
     const noDataMsg = document.getElementById("no-data-msg");
     const ratioCanvas = document.getElementById("ratioChart");
@@ -738,6 +851,9 @@ function updateCharts() {
         
         state.charts.ratio.data.labels = labels;
         state.charts.ratio.data.datasets[0].data = values;
+        // 카테고리 수에 맞춰 팔레트를 순환 적용 (항목이 8개를 넘어도 색상 보장)
+        state.charts.ratio.data.datasets[0].backgroundColor =
+            labels.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]);
         state.charts.ratio.update();
     }
 }
@@ -769,6 +885,25 @@ function formatNumberWithCommas(number) {
     if (number === null || number === undefined) return "0";
     return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+
+// 항목명에서 카테고리를 추출합니다.
+// 괄호(반각 "(" 또는 전각 "（") 앞부분을 카테고리로 간주합니다.
+// 예) "보험(삼성생명)" -> "보험", "보험 (메리츠화재)" -> "보험", "현대카드" -> "현대카드"
+function getCategoryFromItemName(itemName) {
+    if (!itemName) return "";
+    const match = itemName.match(/^\s*([^(（]+?)\s*[\(（]/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    return itemName.trim();
+}
+
+// 카테고리 도넛 차트에 사용할 색상 팔레트 (항목 수가 많을 경우 순환 사용)
+const CHART_PALETTE = [
+    '#6366f1', '#a855f7', '#ec4899', '#f43f5e',
+    '#10b981', '#f59e0b', '#3b82f6', '#06b6d4',
+    '#8b5cf6', '#14b8a6', '#ef4444', '#eab308'
+];
 
 // XSS 취약성 사전 차단을 위한 HTML 이스케이프 유틸
 function escapeHtml(text) {

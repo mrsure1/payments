@@ -384,6 +384,32 @@ body.light-theme .expense-table tbody tr:hover {
 
 .expense-item-name {
     font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    padding: 4px 6px;
+    margin: -4px -6px;
+    transition: var(--transition-fast);
+    border: 1px dashed transparent;
+}
+
+.expense-item-name:hover {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.4);
+}
+
+/* 항목명 인라인 편집용 입력창 */
+.item-name-edit-input {
+    width: 100%;
+    max-width: 220px;
+    background: var(--input-bg);
+    border: 1px solid var(--accent-color);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    padding: 6px 8px;
+    font-family: var(--font-body);
+    font-weight: 500;
+    font-size: 0.95rem;
+    outline: none;
 }
 
 /* 테이블 내부 금액 입력 필드 */
