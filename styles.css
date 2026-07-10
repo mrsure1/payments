@@ -561,13 +561,37 @@ body.light-theme .expense-table tbody tr:hover {
 }
 
 .doughnut-container {
+    position: relative;
     min-height: 200px;
 }
 
+.doughnut-container #ratioChart {
+    max-width: 100%;
+}
+
+/* 데이터 없을 때 문구가 세로로 깨지지 않도록 가로 고정 + 중앙 배치 */
 .no-data-msg {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-secondary);
     font-size: 0.95rem;
     font-weight: 500;
+    white-space: nowrap;
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+    letter-spacing: 0;
+    line-height: 1.4;
+    pointer-events: none;
+    text-align: center;
+    padding: 0 12px;
+}
+
+.no-data-msg.hidden {
+    display: none !important;
 }
 
 /* 3단 분석 그리드 (차트, 구글 동기화, 과거 기록) */

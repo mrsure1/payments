@@ -186,8 +186,11 @@ function renderHistoryList() {
     
     historyContainer.innerHTML = "";
     
-    // 월별 데이터를 정렬하여 리스트 출력 (내림차순)
-    const sortedMonths = Object.keys(state.data).sort().reverse();
+    // 실제 금액이 있는 월만 목록에 표시 (빈 월은 제외)
+    const sortedMonths = Object.keys(state.data)
+        .filter((month) => monthHasExpense(state.data[month]))
+        .sort()
+        .reverse();
     
     if (sortedMonths.length === 0) {
         historyContainer.innerHTML = `<li style="color: var(--text-secondary); text-align: center; padding: 20px 0; font-size: 0.9rem;">저장된 과거 지출 데이터가 없습니다.</li>`;
@@ -274,8 +277,9 @@ function bindExpenseInputs() {
             }
             calculateTotal();
             
-            // 입력할 때마다 실시간으로 메모리 데이터에도 임시 업데이트 (편의성 향상)
+            // 입력할 때마다 메모리 + 로컬스토리지에 자동 저장 (새로고침해도 유지)
             saveCurrentInputsToMemory();
+            persistExpenseData();
             updateCharts();
         });
         
@@ -566,15 +570,27 @@ function saveCurrentInputsToMemory() {
     state.data[state.currentMonth] = monthData;
 }
 
+// 메모리의 월별 데이터를 LocalStorage에 즉시 반영합니다.
+function persistExpenseData() {
+    localStorage.setItem("expense_data", JSON.stringify(state.data));
+}
+
+// 해당 월에 실제 지출(0원 초과)이 있는지 확인
+function monthHasExpense(monthData) {
+    if (!monthData || typeof monthData !== "object") return false;
+    return Object.values(monthData).some((val) => (Number(val) || 0) > 0);
+}
+
 // 현재 입력 데이터를 LocalStorage에 영구 저장합니다.
 function saveCurrentInputsToStorage() {
     saveCurrentInputsToMemory();
-    
-    // 로컬 스토리지 동기화
-    localStorage.setItem("expense_data", JSON.stringify(state.data));
+    persistExpenseData();
     
     // 저장 알림 표시 및 피드백 애니메이션
-    showSaveStatus("데이터가 성공적으로 저장되었습니다!");
+    const monthLabel = state.currentMonth.replace("-", "년 ") + "월";
+    const sum = Object.values(state.data[state.currentMonth] || {})
+        .reduce((acc, val) => acc + (Number(val) || 0), 0);
+    showSaveStatus(`${monthLabel} 저장 완료 (${formatNumberWithCommas(sum)}원)`);
     
     // 화면 정보 다시 출력 및 차트 리프레시
     renderHistoryList();
@@ -607,8 +623,9 @@ function adjustMonth(offset) {
 
 // 월 전환 시 작동 방식
 function changeMonth(targetMonth) {
-    // 1) 전환 전 현재 입력 내용 메모리에 자동 적용
+    // 1) 전환 전 현재 입력 내용을 메모리 + 로컬스토리지에 자동 저장
     saveCurrentInputsToMemory();
+    persistExpenseData();
     
     // 2) 타겟 월 변경 및 UI 적용
     state.currentMonth = targetMonth;
@@ -842,12 +859,21 @@ function updateCharts() {
     const ratioCanvas = document.getElementById("ratioChart");
 
     if (values.length === 0) {
-        // 지출 내역이 아예 없는 경우 대체 문구 출력
+        // 지출 내역이 아예 없는 경우 대체 문구 출력 (캔버스는 숨겨 문구가 가로로 보이게 함)
         if (noDataMsg) noDataMsg.classList.remove("hidden");
-        if (ratioCanvas) ratioCanvas.style.opacity = "0";
+        if (ratioCanvas) {
+            ratioCanvas.style.display = "none";
+            ratioCanvas.style.opacity = "0";
+        }
+        state.charts.ratio.data.labels = [];
+        state.charts.ratio.data.datasets[0].data = [];
+        state.charts.ratio.update();
     } else {
         if (noDataMsg) noDataMsg.classList.add("hidden");
-        if (ratioCanvas) ratioCanvas.style.opacity = "1";
+        if (ratioCanvas) {
+            ratioCanvas.style.display = "block";
+            ratioCanvas.style.opacity = "1";
+        }
         
         state.charts.ratio.data.labels = labels;
         state.charts.ratio.data.datasets[0].data = values;
@@ -974,7 +1000,12 @@ async function initGoogleApi() {
                 }
                 state.google.accessToken = response.access_token;
                 state.google.isAuthenticated = true;
-                
+
+                // 새로고침 후에도 로그인이 유지되도록 토큰과 만료 시각을 저장
+                const expiresInSec = response.expires_in ? Number(response.expires_in) : 3600;
+                localStorage.setItem("google_access_token", response.access_token);
+                localStorage.setItem("google_token_expiry", String(Date.now() + expiresInSec * 1000));
+
                 // 백업/복원 원활한 가동을 위한 토큰 헤더 셋업
                 gapi.client.setToken(response);
                 
@@ -982,7 +1013,21 @@ async function initGoogleApi() {
                 showSaveStatus("구글 드라이브 연동에 성공했습니다.");
             },
         });
-        
+
+        // 이전 세션에서 저장한 토큰이 아직 만료되지 않았으면 로그인 상태를 복원
+        const savedToken = localStorage.getItem("google_access_token");
+        const savedExpiry = Number(localStorage.getItem("google_token_expiry") || "0");
+        if (savedToken && Date.now() < savedExpiry) {
+            state.google.accessToken = savedToken;
+            state.google.isAuthenticated = true;
+            gapi.client.setToken({ access_token: savedToken });
+            updateGoogleLoginUI();
+        } else if (savedToken) {
+            // 이미 만료된 토큰은 정리
+            localStorage.removeItem("google_access_token");
+            localStorage.removeItem("google_token_expiry");
+        }
+
         console.log("구글 API 및 GIS SDK 초기화가 완료되었습니다.");
     } catch (err) {
         console.error("구글 API 초기화 중 예외 발생:", err);
@@ -991,35 +1036,65 @@ async function initGoogleApi() {
 
 // 구글 로그인 권한 인증 실행
 function handleGoogleAuth() {
+    // file:// 로 열면 구글 OAuth가 원본(Origin) 정책으로 막힘
+    if (location.protocol === "file:") {
+        alert(
+            "구글 로그인은 로컬 파일(file://)에서는 동작하지 않습니다.\n\n" +
+            "폴더의 start.bat 을 더블클릭해\n" +
+            "http://localhost:5500 으로 열어 주세요."
+        );
+        return;
+    }
+
     if (!state.google.clientId) {
         alert("먼저 'API 연동 설정' 버튼을 눌러 구글 클라우드에서 발급받은 Client ID를 입력하세요.");
         const settingsModal = document.getElementById("api-settings-modal");
-        if (settingsModal) settingsModal.classList.remove("hidden");
+        if (settingsModal) {
+            settingsModal.classList.remove("hidden");
+            const clientInput = document.getElementById("settings-client-id");
+            if (clientInput) clientInput.focus();
+        }
         return;
     }
+
+    if (typeof google === "undefined" || !google.accounts || !google.accounts.oauth2) {
+        alert("구글 로그인 SDK가 아직 로드되지 않았습니다.\n인터넷 연결을 확인한 뒤 새로고침해 주세요.");
+        return;
+    }
+
+    showSaveStatus("구글 로그인 창을 여는 중...");
 
     if (!state.google.tokenClient) {
         initGoogleApi().then(() => {
             if (state.google.tokenClient) {
-                state.google.tokenClient.requestAccessToken({ prompt: 'consent' });
+                state.google.tokenClient.requestAccessToken({ prompt: "consent" });
             } else {
-                alert("구글 API SDK 초기화가 실패했습니다. API 설정을 확인하세요.");
+                alert(
+                    "구글 API 초기화에 실패했습니다.\n\n" +
+                    "1) API 연동 설정의 Client ID가 올바른지\n" +
+                    "2) 구글 콘솔 승인된 자바스크립트 원본에\n" +
+                    "   http://localhost:5500 이 등록됐는지 확인하세요."
+                );
             }
         });
     } else {
         // 이미 토큰 클라이언트가 있으면 바로 로그인 요청 창 띄움
-        state.google.tokenClient.requestAccessToken({ prompt: 'consent' });
+        state.google.tokenClient.requestAccessToken({ prompt: "consent" });
     }
 }
 
 // 구글 로그아웃
 function handleGoogleSignout() {
+    // 저장해 둔 로그인 토큰 제거 (새로고침 시 자동 복원 방지)
+    localStorage.removeItem("google_access_token");
+    localStorage.removeItem("google_token_expiry");
+
     if (state.google.accessToken) {
         google.accounts.oauth2.revoke(state.google.accessToken, () => {
             state.google.accessToken = null;
             state.google.isAuthenticated = false;
             gapi.client.setToken(null);
-            
+
             updateGoogleLoginUI();
             showSaveStatus("로그아웃 되었습니다.");
         });
