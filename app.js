@@ -269,9 +269,11 @@ async function syncSharedStore() {
     persistLocalMirror();
     await pushSharedStore();
 
-    const monthCount = Object.keys(state.data || {}).filter((m) => monthHasExpense(state.data[m])).length;
-    if (monthCount > 0) {
-        showSaveStatus(`데이터 통합 완료 (${monthCount}개월)`);
+    const months = Object.keys(state.data || {}).filter((m) => monthHasExpense(state.data[m]));
+    if (months.length > 0) {
+        showSaveStatus(`데이터 동기화됨 (${months.join(", ")})`);
+    } else {
+        showSaveStatus("공유 저장소 연결됨");
     }
 }
 
@@ -1310,82 +1312,143 @@ function updateGoogleLoginUI() {
     }
 }
 
-// 구글 드라이브에 지출 데이터 백업하기 (JSON 파일 업로드)
+// 드라이브에서 백업 파일 목록 조회 (앱이 만든 파일만 drive.file 권한으로 보임)
+async function listDriveBackupFiles() {
+    const response = await gapi.client.drive.files.list({
+        q: "name = 'smart_expense_data.json' and trashed = false",
+        fields: "files(id, name, modifiedTime, size)",
+        pageSize: 20,
+        orderBy: "modifiedTime desc",
+        spaces: "drive",
+    });
+    return response.result.files || [];
+}
+
+// 드라이브 JSON 파일 내용 읽기
+async function downloadDriveBackupPayload(fileId) {
+    const contentResponse = await gapi.client.drive.files.get({
+        fileId,
+        alt: "media",
+    });
+
+    let payload = contentResponse.result;
+    if (typeof payload === "string") {
+        payload = JSON.parse(payload);
+    } else if (payload && typeof payload === "object" && !payload.data && contentResponse.body) {
+        // 일부 환경에서는 body 문자열로만 내려옴
+        try {
+            payload = JSON.parse(contentResponse.body);
+        } catch (_) {
+            /* keep original */
+        }
+    }
+
+    if (!payload || typeof payload !== "object") {
+        throw new Error("백업 파일 형식이 올바르지 않습니다.");
+    }
+    if (!payload.data || typeof payload.data !== "object") {
+        throw new Error("백업 파일에 지출 데이터(data)가 없습니다.");
+    }
+    if (!Array.isArray(payload.schema)) {
+        payload.schema = Object.keys(
+            Object.values(payload.data)[0] || {}
+        );
+    }
+    return payload;
+}
+
+function summarizeExpenseMonths(dataObj) {
+    return Object.keys(dataObj || {})
+        .filter((month) => monthHasExpense(dataObj[month]))
+        .sort();
+}
+
+// 구글 드라이브에 지출 데이터 백업하기 (기존 드라이브 데이터와 합친 뒤 저장)
 async function backupDataToGoogleDrive() {
     if (!state.google.isAuthenticated) {
         alert("구글 드라이브에 백업하려면 먼저 구글 로그인을 수행해 주세요.");
         return;
     }
 
-    // 로드 중임을 알리는 상태 표시
+    // 백업 직전 화면 입력값 반영
+    saveCurrentInputsToMemory();
+    persistExpenseData();
+
     const statusBadge = document.getElementById("drive-status");
     if (statusBadge) statusBadge.textContent = "백업 진행 중...";
 
     try {
-        // 1) 드라이브에 이미 'smart_expense_data.json' 파일이 존재하는지 검색
-        const response = await gapi.client.drive.files.list({
-            q: "name = 'smart_expense_data.json' and trashed = false",
-            fields: 'files(id, name)',
-            spaces: 'drive'
-        });
+        const files = await listDriveBackupFiles();
+        let fileId = files.length > 0 ? files[0].id : null;
 
-        const files = response.result.files;
-        
-        // 백업할 전체 데이터 수집
-        const backupPayload = {
-            schema: state.items,
-            data: state.data,
-            lastUpdated: new Date().toISOString()
-        };
-
-        const fileContent = JSON.stringify(backupPayload, null, 2);
-        
-        let fileId = null;
-        if (files && files.length > 0) {
-            fileId = files[0].id;
+        // 기존 드라이브 백업이 있으면 먼저 읽어 합침 (6월 등 과거 월이 0원으로 덮이지 않게)
+        let mergedSchema = [...state.items];
+        let mergedData = { ...state.data };
+        if (fileId) {
+            try {
+                const existing = await downloadDriveBackupPayload(fileId);
+                mergedSchema = mergeItemSchema(mergedSchema, existing.schema);
+                mergedData = mergeExpenseData(mergedData, existing.data);
+            } catch (mergeErr) {
+                console.warn("기존 드라이브 백업 병합 중 경고:", mergeErr);
+            }
         }
 
+        const backupPayload = {
+            schema: mergedSchema,
+            data: mergedData,
+            lastUpdated: new Date().toISOString(),
+        };
+        const fileContent = JSON.stringify(backupPayload, null, 2);
+        const monthList = summarizeExpenseMonths(mergedData);
+
         if (fileId) {
-            // 2-A) 파일이 이미 존재하면 덮어쓰기 (Update)
             await gapi.client.request({
                 path: `/upload/drive/v3/files/${fileId}`,
-                method: 'PATCH',
-                params: { uploadType: 'media' },
-                headers: { 'Content-Type': 'application/json' },
-                body: fileContent
+                method: "PATCH",
+                params: { uploadType: "media" },
+                headers: { "Content-Type": "application/json" },
+                body: fileContent,
             });
-            console.log("구글 드라이브에 파일이 업데이트되었습니다. ID:", fileId);
         } else {
-            // 2-B) 파일이 존재하지 않으면 새 파일 생성 (Create)
             const metadata = {
-                name: 'smart_expense_data.json',
-                mimeType: 'application/json'
+                name: "smart_expense_data.json",
+                mimeType: "application/json",
             };
-
-            const boundary = '314159265358979323846';
+            const boundary = "314159265358979323846";
             const delimiter = "\r\n--" + boundary + "\r\n";
             const close_delim = "\r\n--" + boundary + "--";
-
             const multipartRequestBody =
                 delimiter +
-                'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+                "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
                 JSON.stringify(metadata) +
                 delimiter +
-                'Content-Type: application/json\r\n\r\n' +
+                "Content-Type: application/json\r\n\r\n" +
                 fileContent +
                 close_delim;
 
             await gapi.client.request({
-                path: '/upload/drive/v3/files',
-                method: 'POST',
-                params: { uploadType: 'multipart' },
-                headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
-                body: multipartRequestBody
+                path: "/upload/drive/v3/files",
+                method: "POST",
+                params: { uploadType: "multipart" },
+                headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+                body: multipartRequestBody,
             });
-            console.log("구글 드라이브에 새 백업 파일이 생성되었습니다.");
         }
 
-        alert("모든 지출 데이터가 구글 드라이브에 안전하게 백업되었습니다!");
+        // 로컬에도 합쳐진 결과 반영
+        state.items = mergedSchema;
+        state.data = mergedData;
+        persistLocalMirror();
+        await pushSharedStore();
+        renderAll();
+        updateCharts();
+
+        alert(
+            "구글 드라이브 백업 완료!\n\n" +
+            `저장된 월: ${monthList.length ? monthList.join(", ") : "(금액 있는 월 없음)"}\n` +
+            "파일명: smart_expense_data.json"
+        );
     } catch (err) {
         console.error("구글 드라이브 백업 도중 오류 발생:", err);
         alert("백업 실패: " + (err.result?.error?.message || err.message));
@@ -1394,14 +1457,18 @@ async function backupDataToGoogleDrive() {
     }
 }
 
-// 구글 드라이브에서 데이터 복원하기 (JSON 파일 가져와 적용)
+// 구글 드라이브에서 데이터 복원하기 (로컬과 합치기 - 6월 등 과거 월 복구용)
 async function restoreDataFromGoogleDrive() {
     if (!state.google.isAuthenticated) {
         alert("구글 드라이브에서 복원하려면 먼저 구글 로그인을 수행해 주세요.");
         return;
     }
 
-    if (!confirm("구글 드라이브에서 데이터를 복원하시겠습니까?\n주의: 복원 시 브라우저에 기록되어 있는 현재 데이터는 구글 드라이브 데이터로 완전히 덮어씌워집니다.")) {
+    if (!confirm(
+        "구글 드라이브 백업을 가져와 현재 데이터와 합칠까요?\n\n" +
+        "같은 달이 있으면 금액이 더 큰 쪽을 남깁니다.\n" +
+        "(지금 로컬의 7월 데이터는 유지되고, 드라이브의 6월이 있으면 추가됩니다)"
+    )) {
         return;
     }
 
@@ -1409,42 +1476,39 @@ async function restoreDataFromGoogleDrive() {
     if (statusBadge) statusBadge.textContent = "복원 진행 중...";
 
     try {
-        // 1) 드라이브에서 파일 검색
-        const response = await gapi.client.drive.files.list({
-            q: "name = 'smart_expense_data.json' and trashed = false",
-            fields: 'files(id, name)',
-            spaces: 'drive'
-        });
-
-        const files = response.result.files;
-
-        if (!files || files.length === 0) {
-            alert("구글 드라이브에 저장된 백업 파일('smart_expense_data.json')을 찾을 수 없습니다.");
+        const files = await listDriveBackupFiles();
+        if (!files.length) {
+            alert(
+                "구글 드라이브에서 'smart_expense_data.json' 을 찾지 못했습니다.\n\n" +
+                "확인 방법:\n" +
+                "1) drive.google.com 검색창에 smart_expense_data 입력\n" +
+                "2) 휴지통도 확인\n" +
+                "3) 파일이 있으면 열어 2026-06 금액이 있는지 확인\n" +
+                "4) 예전에 덮어썼다면 파일 → 버전 관리에서 이전 버전 복원"
+            );
             return;
         }
 
-        const fileId = files[0].id;
+        const file = files[0];
+        const restoredPayload = await downloadDriveBackupPayload(file.id);
+        const beforeMonths = summarizeExpenseMonths(state.data);
+        const driveMonths = summarizeExpenseMonths(restoredPayload.data);
 
-        // 2) 파일 미디어 내용 읽기
-        const contentResponse = await gapi.client.drive.files.get({
-            fileId: fileId,
-            alt: 'media'
-        });
+        applyRestoredData(restoredPayload, { merge: true });
 
-        const restoredPayload = contentResponse.result;
+        const afterMonths = summarizeExpenseMonths(state.data);
+        const added = afterMonths.filter((m) => !beforeMonths.includes(m));
 
-        if (!restoredPayload || !restoredPayload.schema || !restoredPayload.data) {
-            // 텍스트 형태로 수신되어 수동 파싱이 필요한 경우 처리
-            let parsed = restoredPayload;
-            if (typeof restoredPayload === 'string') {
-                parsed = JSON.parse(restoredPayload);
-            }
-            applyRestoredData(parsed);
-        } else {
-            applyRestoredData(restoredPayload);
-        }
-
-        alert("구글 드라이브로부터 데이터를 성공적으로 가져와 복원하였습니다!");
+        alert(
+            "드라이브 복원(합치기) 완료!\n\n" +
+            `드라이브에 있던 월: ${driveMonths.length ? driveMonths.join(", ") : "(금액 없음)"}\n` +
+            `새로 추가된 월: ${added.length ? added.join(", ") : "(없음)"}\n` +
+            `현재 보유 월: ${afterMonths.length ? afterMonths.join(", ") : "(없음)"}\n\n` +
+            (driveMonths.includes("2026-06")
+                ? "6월 데이터가 드라이브에 있어 합쳐졌습니다."
+                : "주의: 드라이브 최신 백업에 6월 금액이 없습니다.\n" +
+                  "drive.google.com 에서 파일 → 버전 관리로 예전 백업을 확인해 주세요.")
+        );
     } catch (err) {
         console.error("구글 드라이브 복원 도중 오류 발생:", err);
         alert("복원 실패: " + (err.result?.error?.message || err.message));
@@ -1454,18 +1518,23 @@ async function restoreDataFromGoogleDrive() {
 }
 
 // 가져온 백업본을 브라우저 로컬 데이터베이스에 탑재
-function applyRestoredData(payload) {
-    // 로컬 상태 적용
-    state.items = payload.schema;
-    state.data = payload.data;
-    
-    // 로컬 스토리지 + 공유 저장소에 즉시 동기화
+// merge=true 이면 기존 로컬과 합침(월별 합계가 큰 쪽 유지)
+function applyRestoredData(payload, { merge = false } = {}) {
+    if (!payload || typeof payload !== "object") return;
+
+    if (merge) {
+        state.items = mergeItemSchema(state.items, payload.schema || []);
+        state.data = mergeExpenseData(state.data, payload.data || {});
+    } else {
+        state.items = Array.isArray(payload.schema) ? payload.schema : state.items;
+        state.data = payload.data && typeof payload.data === "object" ? payload.data : {};
+    }
+
     persistLocalMirror();
     pushSharedStore();
-    
-    // 화면 전체 강제 갱신
     renderAll();
     updateCharts();
+    showSaveStatus("드라이브 데이터 반영 완료");
 }
 
 // ==========================================================================
