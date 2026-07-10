@@ -1190,8 +1190,7 @@ async function initGoogleApi() {
         });
         
         // GIS(Google Identity Services) 토큰 클라이언트 초기화
-        // drive.file 은 '이 앱이 만든 파일'만 보여서 PC/모바일 간 복원이 실패함
-        // → 드라이브 전체에서 smart_expense_data.json 을 찾고 합치기 위해 drive 권한 사용
+        // PC/모바일 간 백업 JSON을 서로 찾기 위해 drive 권한 사용
         state.google.tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: state.google.clientId,
             scope: "https://www.googleapis.com/auth/drive",
@@ -1207,13 +1206,29 @@ async function initGoogleApi() {
                 const expiresInSec = response.expires_in ? Number(response.expires_in) : 3600;
                 localStorage.setItem("google_access_token", response.access_token);
                 localStorage.setItem("google_token_expiry", String(Date.now() + expiresInSec * 1000));
-                localStorage.setItem("google_drive_scope", "drive");
+
+                // 실제 부여된 스코프 기록 (drive.file 만이면 복원 실패함)
+                const granted = String(response.scope || "");
+                const scopes = granted.split(/\s+/).filter(Boolean);
+                const fullDrive = scopes.includes("https://www.googleapis.com/auth/drive");
+                localStorage.setItem("google_drive_scope", fullDrive ? "drive" : "drive.file");
+                localStorage.setItem("google_granted_scopes", granted);
 
                 // 백업/복원 원활한 가동을 위한 토큰 헤더 셋업
                 gapi.client.setToken(response);
                 
                 updateGoogleLoginUI();
-                showSaveStatus("구글 드라이브 연동에 성공했습니다.");
+                if (fullDrive) {
+                    showSaveStatus("구글 드라이브 연동에 성공했습니다.");
+                } else {
+                    showSaveStatus("권한 부족: 다시 로그인 필요");
+                    alert(
+                        "드라이브 권한이 부족합니다.\n\n" +
+                        "로그인 화면에서 Google Drive 접근을 허용해 주세요.\n" +
+                        "구글 클라우드 콘솔 OAuth 범위에\n" +
+                        ".../auth/drive 가 추가돼 있는지도 확인하세요."
+                    );
+                }
             },
         });
 
@@ -1345,18 +1360,56 @@ function updateGoogleLoginUI() {
     }
 }
 
-// 드라이브에서 백업 파일 목록 조회 (같은 이름 파일 전부 검색)
+// 이전에 확인된 통합 백업 파일 ID (앱 간 권한 이슈 시 직접 조회용)
+const KNOWN_BACKUP_FILE_IDS = [
+    "1LDreX17VnRBKKc1tafs14g9E9ciqZTxT",
+];
+
+// 드라이브에서 백업 파일 목록 조회 (여러 검색어 + 알려진 ID)
 async function listDriveBackupFiles() {
-    const response = await gapi.client.drive.files.list({
-        q: "name = 'smart_expense_data.json' and trashed = false",
-        fields: "files(id, name, modifiedTime, size, createdTime)",
-        pageSize: 50,
-        orderBy: "modifiedTime desc",
-        spaces: "drive",
-        corpora: "user",
-        includeItemsFromAllDrives: false,
-    });
-    return response.result.files || [];
+    const found = new Map();
+
+    const queries = [
+        "name = 'smart_expense_data.json' and trashed = false",
+        "name contains 'smart_expense_data' and trashed = false",
+        "name contains 'smart_expense' and trashed = false",
+    ];
+
+    for (const q of queries) {
+        try {
+            const response = await gapi.client.drive.files.list({
+                q,
+                fields: "files(id, name, modifiedTime, size, createdTime)",
+                pageSize: 50,
+                orderBy: "modifiedTime desc",
+                spaces: "drive",
+                corpora: "user",
+            });
+            (response.result.files || []).forEach((f) => found.set(f.id, f));
+        } catch (err) {
+            console.warn("드라이브 검색 실패:", q, err);
+        }
+    }
+
+    // 목록에 없어도 알려진 파일 ID는 메타데이터로 직접 확인
+    for (const id of KNOWN_BACKUP_FILE_IDS) {
+        if (found.has(id)) continue;
+        try {
+            const meta = await gapi.client.drive.files.get({
+                fileId: id,
+                fields: "id, name, modifiedTime, size, createdTime, trashed",
+            });
+            if (meta.result && !meta.result.trashed) {
+                found.set(id, meta.result);
+            }
+        } catch (err) {
+            console.warn("알려진 백업 파일 접근 실패:", id, err);
+        }
+    }
+
+    return Array.from(found.values()).sort((a, b) =>
+        String(b.modifiedTime || "").localeCompare(String(a.modifiedTime || ""))
+    );
 }
 
 // 드라이브 JSON 파일 내용 읽기
@@ -1505,7 +1558,7 @@ async function backupDataToGoogleDrive() {
                 body: fileContent,
             });
 
-            // 앱이 만든 동명 중복 파일은 휴지통으로 이동 (하나만 남김)
+            // 동명 중복 백업 파일은 휴지통으로 이동 (하나만 남김)
             for (const dup of driveBundle.files.slice(1)) {
                 try {
                     await gapi.client.drive.files.update({
@@ -1577,6 +1630,18 @@ async function restoreDataFromGoogleDrive() {
         return;
     }
 
+    // 예전 drive.file 권한으로 로그인한 상태면 복원 전에 재로그인 강제
+    if (localStorage.getItem("google_drive_scope") !== "drive") {
+        alert(
+            "드라이브 권한이 예전 버전입니다.\n\n" +
+            "로그아웃 후 다시 구글 로그인해서\n" +
+            "'Google Drive' 접근을 허용해 주세요.\n" +
+            "(앱이 만든 파일만이 아니라 드라이브의 백업 JSON을 찾습니다)"
+        );
+        handleGoogleSignout();
+        return;
+    }
+
     if (!confirm(
         "구글 드라이브 백업을 가져와 현재 데이터와 합칠까요?\n\n" +
         "같은 달이 있으면 금액이 더 큰 쪽을 남깁니다.\n" +
@@ -1591,16 +1656,22 @@ async function restoreDataFromGoogleDrive() {
     try {
         const driveBundle = await loadAndMergeAllDriveBackups();
         if (!driveBundle.files.length) {
-            alert(
-                "구글 드라이브에서 'smart_expense_data.json' 을 찾지 못했습니다.\n\n" +
-                "해결 방법:\n" +
-                "1) 로그아웃 후 다시 구글 로그인\n" +
-                "   (드라이브 전체 접근 권한을 새로 허용해야 합니다)\n" +
-                "2) 권한 화면에서 드라이브 접근을 허용\n" +
-                "3) 그다음 다시 '드라이브 복원'\n\n" +
-                "그래도 안 되면 drive.google.com 에서\n" +
-                "smart_expense_data 파일이 같은 구글 계정에 있는지 확인하세요."
+            const reauth = confirm(
+                "구글 드라이브에서 백업 파일을 찾지 못했습니다.\n\n" +
+                "지금 바로 구글 권한을 다시 받을까요?\n" +
+                "(로그인 화면에서 Google Drive 접근을 꼭 허용하세요)\n\n" +
+                "취소하면 안내만 닫습니다."
             );
+            if (reauth) {
+                localStorage.removeItem("google_access_token");
+                localStorage.removeItem("google_token_expiry");
+                localStorage.removeItem("google_drive_scope");
+                state.google.accessToken = null;
+                state.google.isAuthenticated = false;
+                if (typeof gapi !== "undefined" && gapi.client) gapi.client.setToken(null);
+                updateGoogleLoginUI();
+                handleGoogleAuth();
+            }
             return;
         }
 
