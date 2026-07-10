@@ -1391,14 +1391,18 @@ async function backupDataToGoogleDrive() {
         const files = await listDriveBackupFiles();
         let fileId = files.length > 0 ? files[0].id : null;
 
-        // 기존 드라이브 백업이 있으면 먼저 읽어 합침 (6월 등 과거 월이 0원으로 덮이지 않게)
+        // 드라이브 기존본 + 이 기기 데이터를 합침
+        // (금액이 더 큰 달을 남김 → 모바일 6월이 드라이브 0원 6월을 덮어씀)
         let mergedSchema = [...state.items];
         let mergedData = { ...state.data };
+        let driveMonthsBefore = [];
         if (fileId) {
             try {
                 const existing = await downloadDriveBackupPayload(fileId);
-                mergedSchema = mergeItemSchema(mergedSchema, existing.schema);
-                mergedData = mergeExpenseData(mergedData, existing.data);
+                driveMonthsBefore = summarizeExpenseMonths(existing.data);
+                mergedSchema = mergeItemSchema(existing.schema || [], state.items);
+                // 기준=드라이브, 덮어쓸 후보=이 기기 → 기기 쪽 금액이 크거나 같으면 기기 값 채택
+                mergedData = mergeExpenseData(existing.data || {}, state.data);
             } catch (mergeErr) {
                 console.warn("기존 드라이브 백업 병합 중 경고:", mergeErr);
             }
@@ -1408,9 +1412,11 @@ async function backupDataToGoogleDrive() {
             schema: mergedSchema,
             data: mergedData,
             lastUpdated: new Date().toISOString(),
+            source: location.origin,
         };
         const fileContent = JSON.stringify(backupPayload, null, 2);
         const monthList = summarizeExpenseMonths(mergedData);
+        const localMonths = summarizeExpenseMonths(state.data);
 
         if (fileId) {
             await gapi.client.request({
@@ -1456,8 +1462,12 @@ async function backupDataToGoogleDrive() {
 
         alert(
             "구글 드라이브 백업 완료!\n\n" +
-            `저장된 월: ${monthList.length ? monthList.join(", ") : "(금액 있는 월 없음)"}\n` +
-            "파일명: smart_expense_data.json"
+            `이 기기 월: ${localMonths.length ? localMonths.join(", ") : "(없음)"}\n` +
+            `드라이브에 있던 월: ${driveMonthsBefore.length ? driveMonthsBefore.join(", ") : "(없음/신규)"}\n` +
+            `합친 뒤 저장된 월: ${monthList.length ? monthList.join(", ") : "(금액 있는 월 없음)"}\n` +
+            `주소: ${location.origin}\n` +
+            "파일명: smart_expense_data.json\n\n" +
+            "drive.google.com 에서 파일을 열어 6월 합계를 확인해 주세요."
         );
     } catch (err) {
         console.error("구글 드라이브 백업 도중 오류 발생:", err);
