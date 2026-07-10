@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -7,50 +8,70 @@ echo  ========================================
 echo   Smart Expense Tracker - Local Server
 echo  ========================================
 echo.
-echo  Google login does NOT work on file://
-echo  Opening http://localhost:5500 ...
+
+REM Prefer Node (reliable on this PC), then full-path Python, then py launcher
+set "RUNNER="
+set "RUN_CMD="
+
+where node >nul 2>&1
+if not errorlevel 1 (
+  set "RUNNER=node"
+  set "RUN_CMD=node server.js"
+  goto :run
+)
+
+if exist "C:\Python314\python.exe" (
+  set "RUNNER=python314"
+  set "RUN_CMD=C:\Python314\python.exe -m http.server 5500 --bind 127.0.0.1"
+  goto :run
+)
+
+if exist "%LocalAppData%\Programs\Python\Python311\python.exe" (
+  set "RUNNER=python311"
+  set "RUN_CMD=%LocalAppData%\Programs\Python\Python311\python.exe -m http.server 5500 --bind 127.0.0.1"
+  goto :run
+)
+
+where py >nul 2>&1
+if not errorlevel 1 (
+  set "RUNNER=py"
+  set "RUN_CMD=py -3 -m http.server 5500 --bind 127.0.0.1"
+  goto :run
+)
+
+echo  [ERROR] Node.js or Python was not found in PATH.
+echo  Install Node.js from https://nodejs.org  then run start.bat again.
+echo.
+echo  Do NOT open index.html directly - Google login will not work.
+echo.
+pause
+exit /b 1
+
+:run
+echo  Using: %RUNNER%
+echo  URL:   http://127.0.0.1:5500/index.html
+echo.
+echo  Browser opens automatically when the server is ready.
+echo  Close this window to stop the server.
 echo.
 
-set "PY="
-where python >nul 2>&1 && set "PY=python"
-if not defined PY (
-  where py >nul 2>&1 && set "PY=py"
-)
-
-if not defined PY (
-  echo  [ERROR] Python not found.
-  echo  Install Python, or open index.html directly.
-  echo  (Google login will not work with file://)
-  echo.
-  start "" "%~dp0index.html"
-  pause
-  exit /b 1
-)
-
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:5500/index.html' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+REM If something is already serving 5500, just open the browser
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:5500/index.html' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 (
   echo  Server already running. Opening browser...
-  start "" "http://localhost:5500/index.html"
+  start "" "http://127.0.0.1:5500/index.html"
   echo.
-  echo  Close this window when done. (Server keeps running elsewhere)
   pause
   exit /b 0
 )
 
-echo  Starting Python server...
-echo  URL: http://localhost:5500/index.html
-echo.
-echo  Browser will open shortly.
-echo  Closing this window stops the server.
-echo.
-
-start "open-browser" /min cmd /c "timeout /t 2 /nobreak >nul & start http://localhost:5500/index.html"
-
-"%PY%" -m http.server 5500
-if errorlevel 1 (
+%RUN_CMD%
+set "ERR=%ERRORLEVEL%"
+if not "%ERR%"=="0" (
   echo.
-  echo  [ERROR] Failed to start server.
-  echo  Is port 5500 already in use?
+  echo  [ERROR] Server failed to start. Exit code: %ERR%
+  echo  Port 5500 may be in use. Try closing other terminals and retry.
+  echo.
   pause
-  exit /b 1
+  exit /b %ERR%
 )
