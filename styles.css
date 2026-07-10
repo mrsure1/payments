@@ -809,6 +809,11 @@ body.light-theme .expense-table tbody tr:hover {
     background: rgba(99, 102, 241, 0.08);
 }
 
+.import-json-btn {
+    width: 100%;
+    margin-top: 10px;
+}
+
 /* 설정 링크 버튼 */
 .settings-link-btn {
     background: transparent;

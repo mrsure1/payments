@@ -727,6 +727,14 @@ function setupEventListeners() {
     if (driveRestoreBtn) {
         driveRestoreBtn.addEventListener("click", restoreDataFromGoogleDrive);
     }
+
+    // 10) 드라이브 JSON 파일 직접 가져오기 (복원이 실패할 때 수동 합치기)
+    const importJsonBtn = document.getElementById("import-json-btn");
+    const importJsonFile = document.getElementById("import-json-file");
+    if (importJsonBtn && importJsonFile) {
+        importJsonBtn.addEventListener("click", () => importJsonFile.click());
+        importJsonFile.addEventListener("change", handleImportJsonFile);
+    }
 }
 
 // ==========================================================================
@@ -1615,6 +1623,48 @@ function applyRestoredData(payload, { merge = false } = {}) {
     renderAll();
     updateCharts();
     showSaveStatus("드라이브 데이터 반영 완료");
+}
+
+// 드라이브에서 다운로드한 JSON / 화면의 JSON을 직접 합치기
+async function handleImportJsonFile(event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        let payload = JSON.parse(text);
+
+        // { data: { "2026-06": {...} } } 또는 월 객체만 붙여넣은 경우 모두 허용
+        if (!payload.data && payload["2026-06"]) {
+            payload = { schema: Object.keys(payload["2026-06"]), data: payload };
+        }
+        if (!payload.data && typeof payload === "object") {
+            const maybeMonths = Object.keys(payload).filter((k) => /^\d{4}-\d{2}$/.test(k));
+            if (maybeMonths.length) {
+                payload = { schema: [], data: payload };
+            }
+        }
+        if (!payload.data || typeof payload.data !== "object") {
+            throw new Error("JSON에 data(월별 지출) 객체가 없습니다.");
+        }
+
+        const before = summarizeExpenseMonths(state.data);
+        const incoming = summarizeExpenseMonths(payload.data);
+        applyRestoredData(payload, { merge: true });
+        const after = summarizeExpenseMonths(state.data);
+        const added = after.filter((m) => !before.includes(m));
+
+        alert(
+            "JSON 가져오기 완료!\n\n" +
+            `파일에 있던 월: ${incoming.length ? incoming.join(", ") : "(금액 없음)"}\n` +
+            `새로 추가된 월: ${added.length ? added.join(", ") : "(없음)"}\n` +
+            `현재 보유 월: ${after.length ? after.join(", ") : "(없음)"}`
+        );
+    } catch (err) {
+        console.error("JSON 가져오기 실패:", err);
+        alert("JSON 가져오기 실패: " + err.message);
+    }
 }
 
 // ==========================================================================
