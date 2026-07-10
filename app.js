@@ -1488,6 +1488,18 @@ async function backupDataToGoogleDrive() {
                 headers: { "Content-Type": "application/json" },
                 body: fileContent,
             });
+
+            // 앱이 만든 동명 중복 파일은 휴지통으로 이동 (하나만 남김)
+            for (const dup of driveBundle.files.slice(1)) {
+                try {
+                    await gapi.client.drive.files.update({
+                        fileId: dup.id,
+                        resource: { trashed: true },
+                    });
+                } catch (trashErr) {
+                    console.warn("중복 백업 삭제 실패:", dup.id, trashErr);
+                }
+            }
         } else {
             const metadata = {
                 name: "smart_expense_data.json",
@@ -1522,14 +1534,17 @@ async function backupDataToGoogleDrive() {
         renderAll();
         updateCharts();
 
+        const keptId = fileId || "(새 파일)";
         alert(
             "구글 드라이브 백업 완료!\n\n" +
             `이 기기 월: ${localMonths.length ? localMonths.join(", ") : "(없음)"}\n` +
-            `드라이브 파일 수: ${driveBundle.files.length}\n` +
-            `드라이브에 있던 월: ${driveMonthsBefore.length ? driveMonthsBefore.join(", ") : "(없음/신규)"}\n` +
             `합친 뒤 저장된 월: ${monthList.length ? monthList.join(", ") : "(금액 있는 월 없음)"}\n` +
-            `주소: ${location.origin}\n` +
-            "파일명: smart_expense_data.json"
+            `남긴 파일 ID: ${keptId}\n` +
+            (driveBundle.files.length > 1
+                ? `중복 ${driveBundle.files.length - 1}개를 휴지통으로 옮겼습니다.\n`
+                : "") +
+            "파일명: smart_expense_data.json\n\n" +
+            "드라이브에 파일이 2개면, 위 ID가 아닌 쪽을 지우세요."
         );
     } catch (err) {
         console.error("구글 드라이브 백업 도중 오류 발생:", err);
