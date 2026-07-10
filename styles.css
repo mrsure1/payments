@@ -144,6 +144,8 @@ body {
 }
 
 .month-selector span {
+    position: relative;
+    z-index: 1;
     font-size: 1rem;
     font-weight: 600;
     min-width: 110px;
@@ -152,18 +154,24 @@ body {
     user-select: none;
 }
 
+/* 화살표 클릭을 가로채지 않도록 화면 밖으로 숨김 (월 텍스트 클릭 시 JS로 피커 오픈) */
 .hidden-picker {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    width: 1px;
+    height: 1px;
     opacity: 0;
-    cursor: pointer;
+    pointer-events: none;
+    border: 0;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
 }
 
 /* 공통 아이콘 버튼 */
 .icon-btn {
+    position: relative;
+    z-index: 2;
     background: transparent;
     border: none;
     outline: none;

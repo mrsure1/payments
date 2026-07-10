@@ -464,7 +464,17 @@ function setupEventListeners() {
     const monthPicker = document.getElementById("month-picker");
     if (monthDisplay && monthPicker) {
         monthDisplay.addEventListener("click", () => {
-            monthPicker.showPicker(); // 브라우저 빌트인 월 선택기 호출
+            try {
+                if (typeof monthPicker.showPicker === "function") {
+                    monthPicker.showPicker();
+                } else {
+                    monthPicker.focus();
+                    monthPicker.click();
+                }
+            } catch (_) {
+                monthPicker.focus();
+                monthPicker.click();
+            }
         });
         
         monthPicker.addEventListener("change", (e) => {
