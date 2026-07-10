@@ -9,7 +9,6 @@ echo   Smart Expense Tracker - Local Server
 echo  ========================================
 echo.
 
-REM Prefer Node (reliable on this PC), then full-path Python, then py launcher
 set "RUNNER="
 set "RUN_CMD="
 
@@ -22,20 +21,20 @@ if not errorlevel 1 (
 
 if exist "C:\Python314\python.exe" (
   set "RUNNER=python314"
-  set "RUN_CMD=C:\Python314\python.exe -m http.server 5500 --bind 127.0.0.1"
+  set "RUN_CMD=C:\Python314\python.exe -m http.server 5500 --bind 0.0.0.0"
   goto :run
 )
 
 if exist "%LocalAppData%\Programs\Python\Python311\python.exe" (
   set "RUNNER=python311"
-  set "RUN_CMD=%LocalAppData%\Programs\Python\Python311\python.exe -m http.server 5500 --bind 127.0.0.1"
+  set "RUN_CMD=%LocalAppData%\Programs\Python\Python311\python.exe -m http.server 5500 --bind 0.0.0.0"
   goto :run
 )
 
 where py >nul 2>&1
 if not errorlevel 1 (
   set "RUNNER=py"
-  set "RUN_CMD=py -3 -m http.server 5500 --bind 127.0.0.1"
+  set "RUN_CMD=py -3 -m http.server 5500 --bind 0.0.0.0"
   goto :run
 )
 
@@ -49,17 +48,16 @@ exit /b 1
 
 :run
 echo  Using: %RUNNER%
-echo  URL:   http://127.0.0.1:5500/index.html
+echo  URL:   http://localhost:5500/index.html
 echo.
 echo  Browser opens automatically when the server is ready.
 echo  Close this window to stop the server.
 echo.
 
-REM If something is already serving 5500, just open the browser
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:5500/index.html' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:5500/index.html' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 (
   echo  Server already running. Opening browser...
-  start "" "http://127.0.0.1:5500/index.html"
+  start "" "http://localhost:5500/index.html"
   echo.
   pause
   exit /b 0

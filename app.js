@@ -43,11 +43,15 @@ const state = {
 // ==========================================================================
 
 // 문서가 모두 로드되면 실행되는 진입점
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
     initTheme();
     initDateTime();
     loadLocalStorage();
     loadGoogleConfig(); // 구글 API 연동 설정 불러오기
+
+    // localhost / 127.0.0.1 LocalStorage를 서버 공유 저장소와 합침
+    await syncSharedStore();
+
     renderAll();
     initChartInstances();
     updateCharts();
@@ -99,7 +103,11 @@ function loadLocalStorage() {
     // 1) 지출 항목 목록 로드 (없으면 기본 스키마 사용)
     const savedItems = localStorage.getItem("expense_items_schema");
     if (savedItems) {
-        state.items = JSON.parse(savedItems);
+        try {
+            state.items = JSON.parse(savedItems);
+        } catch {
+            state.items = [...DEFAULT_EXPENSE_ITEMS];
+        }
     } else {
         state.items = [...DEFAULT_EXPENSE_ITEMS];
         localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
@@ -108,11 +116,169 @@ function loadLocalStorage() {
     // 2) 월별 지출 데이터 로드
     const savedData = localStorage.getItem("expense_data");
     if (savedData) {
-        state.data = JSON.parse(savedData);
+        try {
+            state.data = JSON.parse(savedData) || {};
+        } catch {
+            state.data = {};
+        }
     } else {
         state.data = {};
         localStorage.setItem("expense_data", JSON.stringify(state.data));
     }
+}
+
+// --------------------------------------------------------------------------
+// localhost ↔ 127.0.0.1 데이터 통합 (서버 data/store.json 공유)
+// --------------------------------------------------------------------------
+
+function isLocalHttpOrigin() {
+    return location.protocol === "http:" || location.protocol === "https:";
+}
+
+function monthExpenseSum(monthData) {
+    if (!monthData || typeof monthData !== "object") return 0;
+    return Object.values(monthData).reduce((acc, val) => acc + (Number(val) || 0), 0);
+}
+
+// 두 월별 데이터셋을 합칩니다. 같은 월이면 합계가 더 큰 쪽을 채택합니다.
+function mergeExpenseData(baseData, incomingData) {
+    const merged = { ...(baseData || {}) };
+    Object.keys(incomingData || {}).forEach((month) => {
+        const incoming = incomingData[month] || {};
+        const current = merged[month];
+        if (!current) {
+            merged[month] = { ...incoming };
+            return;
+        }
+        if (monthExpenseSum(incoming) >= monthExpenseSum(current)) {
+            merged[month] = { ...incoming };
+        }
+    });
+    return merged;
+}
+
+// 항목 스키마 합치기 (순서 유지, 중복 제거)
+function mergeItemSchema(baseItems, incomingItems) {
+    const result = Array.isArray(baseItems) ? [...baseItems] : [];
+    (incomingItems || []).forEach((item) => {
+        if (item && !result.includes(item)) {
+            result.push(item);
+        }
+    });
+    return result.length ? result : [...DEFAULT_EXPENSE_ITEMS];
+}
+
+function buildSharedPayload() {
+    return {
+        schema: state.items,
+        data: state.data,
+        google_client_id: state.google.clientId || localStorage.getItem("google_client_id") || "",
+        google_api_key: state.google.apiKey || localStorage.getItem("google_api_key") || "",
+        theme: state.theme || localStorage.getItem("app_theme") || "",
+    };
+}
+
+function applySharedPayloadToState(payload, { preferIncomingGoogle = true } = {}) {
+    if (!payload || typeof payload !== "object") return false;
+
+    let changed = false;
+
+    if (Array.isArray(payload.schema) && payload.schema.length) {
+        const mergedSchema = mergeItemSchema(state.items, payload.schema);
+        if (JSON.stringify(mergedSchema) !== JSON.stringify(state.items)) {
+            state.items = mergedSchema;
+            changed = true;
+        }
+    }
+
+    if (payload.data && typeof payload.data === "object") {
+        const before = JSON.stringify(state.data);
+        state.data = mergeExpenseData(state.data, payload.data);
+        if (JSON.stringify(state.data) !== before) {
+            changed = true;
+        }
+    }
+
+    if (preferIncomingGoogle) {
+        if (payload.google_client_id && !state.google.clientId) {
+            state.google.clientId = payload.google_client_id;
+            localStorage.setItem("google_client_id", payload.google_client_id);
+            changed = true;
+        }
+        if (payload.google_api_key && !state.google.apiKey) {
+            state.google.apiKey = payload.google_api_key;
+            localStorage.setItem("google_api_key", payload.google_api_key);
+            changed = true;
+        }
+    }
+
+    if (payload.theme && !localStorage.getItem("app_theme")) {
+        state.theme = payload.theme;
+        localStorage.setItem("app_theme", payload.theme);
+        if (state.theme === "light") {
+            document.body.classList.remove("dark-theme");
+            document.body.classList.add("light-theme");
+        }
+        changed = true;
+    }
+
+    return changed;
+}
+
+function persistLocalMirror() {
+    localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
+    localStorage.setItem("expense_data", JSON.stringify(state.data));
+}
+
+async function fetchSharedStore() {
+    if (!isLocalHttpOrigin()) return null;
+    try {
+        const res = await fetch("/api/data", { cache: "no-store" });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch (err) {
+        console.warn("공유 저장소 읽기 실패:", err);
+        return null;
+    }
+}
+
+async function pushSharedStore() {
+    if (!isLocalHttpOrigin()) return false;
+    try {
+        const res = await fetch("/api/data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildSharedPayload()),
+        });
+        return res.ok;
+    } catch (err) {
+        console.warn("공유 저장소 쓰기 실패:", err);
+        return false;
+    }
+}
+
+// 현재 브라우저 LocalStorage + 서버 공유 저장소를 합친 뒤 양쪽에 반영
+async function syncSharedStore() {
+    if (!isLocalHttpOrigin()) return;
+
+    const remote = await fetchSharedStore();
+    if (remote) {
+        applySharedPayloadToState(remote, { preferIncomingGoogle: true });
+    }
+
+    persistLocalMirror();
+    await pushSharedStore();
+
+    const monthCount = Object.keys(state.data || {}).filter((m) => monthHasExpense(state.data[m])).length;
+    if (monthCount > 0) {
+        showSaveStatus(`데이터 통합 완료 (${monthCount}개월)`);
+    }
+}
+
+// 로컬 변경을 LocalStorage + 공유 저장소에 함께 반영
+async function persistAllStores() {
+    persistLocalMirror();
+    await pushSharedStore();
 }
 
 // ==========================================================================
@@ -403,7 +569,7 @@ function renameExpenseItem(oldName, newName) {
             state.data[month] = rebuilt;
         }
     });
-    localStorage.setItem("expense_data", JSON.stringify(state.data));
+    persistExpenseData();
 
     // 전체 갱신
     renderAll();
@@ -580,9 +746,11 @@ function saveCurrentInputsToMemory() {
     state.data[state.currentMonth] = monthData;
 }
 
-// 메모리의 월별 데이터를 LocalStorage에 즉시 반영합니다.
+// 메모리의 월별 데이터를 LocalStorage + 공유 저장소에 즉시 반영합니다.
 function persistExpenseData() {
     localStorage.setItem("expense_data", JSON.stringify(state.data));
+    // 공유 저장소는 비동기 반영 (입력 반응성 유지)
+    pushSharedStore();
 }
 
 // 해당 월에 실제 지출(0원 초과)이 있는지 확인
@@ -667,6 +835,7 @@ function addExpenseItem(itemName) {
         state.data[state.currentMonth] = {};
     }
     state.data[state.currentMonth][itemName] = 0;
+    persistExpenseData();
     
     // 전체 갱신
     renderAll();
@@ -685,7 +854,7 @@ function deleteExpenseItem(itemName) {
             delete state.data[month][itemName];
         }
     });
-    localStorage.setItem("expense_data", JSON.stringify(state.data));
+    persistExpenseData();
     
     // 전체 갱신
     renderAll();
@@ -696,7 +865,7 @@ function deleteExpenseItem(itemName) {
 function deleteHistoryMonth(month) {
     if (state.data[month]) {
         delete state.data[month];
-        localStorage.setItem("expense_data", JSON.stringify(state.data));
+        persistExpenseData();
         
         // 현재 삭제 대상 월을 보고 있었다면 현재 화면 초기화
         if (state.currentMonth === month) {
@@ -970,6 +1139,7 @@ function saveGoogleConfig(clientId, apiKey) {
     
     localStorage.setItem("google_client_id", clientId);
     localStorage.setItem("google_api_key", apiKey);
+    pushSharedStore();
     
     showSaveStatus("API 설정이 저장되었습니다.");
     
@@ -1289,9 +1459,9 @@ function applyRestoredData(payload) {
     state.items = payload.schema;
     state.data = payload.data;
     
-    // 로컬 스토리지에 즉시 동기화
-    localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
-    localStorage.setItem("expense_data", JSON.stringify(state.data));
+    // 로컬 스토리지 + 공유 저장소에 즉시 동기화
+    persistLocalMirror();
+    pushSharedStore();
     
     // 화면 전체 강제 갱신
     renderAll();
@@ -1389,8 +1559,9 @@ function bindExpenseDragEvents() {
                 state.items.splice(draggedIndex, 1);
                 state.items.splice(targetIndex, 0, draggedName);
 
-                // 순서 스키마 로컬 스토리지 보존
+                // 순서 스키마 로컬 + 공유 저장소 보존
                 localStorage.setItem("expense_items_schema", JSON.stringify(state.items));
+                pushSharedStore();
                 
                 // 테이블 리렌더링 및 차트 갱신
                 renderAll();
