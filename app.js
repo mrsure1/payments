@@ -1326,10 +1326,11 @@ function updateGoogleLoginUI() {
 async function listDriveBackupFiles() {
     const response = await gapi.client.drive.files.list({
         q: "name = 'smart_expense_data.json' and trashed = false",
-        fields: "files(id, name, modifiedTime, size)",
-        pageSize: 20,
+        fields: "files(id, name, modifiedTime, size, createdTime)",
+        pageSize: 50,
         orderBy: "modifiedTime desc",
         spaces: "drive",
+        corpora: "user",
     });
     return response.result.files || [];
 }
@@ -1353,6 +1354,15 @@ async function downloadDriveBackupPayload(fileId) {
         }
     }
 
+    // body가 문자열로만 온 경우 추가 시도
+    if ((!payload || typeof payload !== "object" || !payload.data) && typeof contentResponse.body === "string") {
+        try {
+            payload = JSON.parse(contentResponse.body);
+        } catch (_) {
+            /* keep */
+        }
+    }
+
     if (!payload || typeof payload !== "object") {
         throw new Error("백업 파일 형식이 올바르지 않습니다.");
     }
@@ -1373,6 +1383,62 @@ function summarizeExpenseMonths(dataObj) {
         .sort();
 }
 
+// 드라이브에 있는 동명 백업 파일들을 모두 읽어 하나로 합침
+async function loadAndMergeAllDriveBackups() {
+    const files = await listDriveBackupFiles();
+    if (!files.length) {
+        return {
+            files: [],
+            schema: [],
+            data: {},
+            perFile: [],
+        };
+    }
+
+    let mergedSchema = [];
+    let mergedData = {};
+    const perFile = [];
+
+    for (const file of files) {
+        try {
+            const payload = await downloadDriveBackupPayload(file.id);
+            const months = summarizeExpenseMonths(payload.data);
+            perFile.push({
+                id: file.id,
+                modifiedTime: file.modifiedTime || "",
+                months,
+            });
+            mergedSchema = mergeItemSchema(mergedSchema, payload.schema || []);
+            mergedData = mergeExpenseData(mergedData, payload.data || {});
+        } catch (err) {
+            console.warn("백업 파일 읽기 실패:", file.id, err);
+            perFile.push({
+                id: file.id,
+                modifiedTime: file.modifiedTime || "",
+                months: [],
+                error: err.message || String(err),
+            });
+        }
+    }
+
+    return {
+        files,
+        schema: mergedSchema,
+        data: mergedData,
+        perFile,
+        primaryFileId: files[0].id,
+    };
+}
+
+function formatDriveFileSummary(perFile) {
+    if (!perFile.length) return "(파일 없음)";
+    return perFile.map((f, i) => {
+        const when = f.modifiedTime ? f.modifiedTime.replace("T", " ").slice(0, 16) : "?";
+        const months = f.months && f.months.length ? f.months.join(",") : (f.error ? `오류:${f.error}` : "금액없음");
+        return `${i + 1}) ${when} → ${months}`;
+    }).join("\n");
+}
+
 // 구글 드라이브에 지출 데이터 백업하기 (기존 드라이브 데이터와 합친 뒤 저장)
 async function backupDataToGoogleDrive() {
     if (!state.google.isAuthenticated) {
@@ -1388,25 +1454,13 @@ async function backupDataToGoogleDrive() {
     if (statusBadge) statusBadge.textContent = "백업 진행 중...";
 
     try {
-        const files = await listDriveBackupFiles();
-        let fileId = files.length > 0 ? files[0].id : null;
+        // 드라이브에 있는 모든 동명 백업을 먼저 합친 뒤, 이 기기 데이터를 덮어씀
+        const driveBundle = await loadAndMergeAllDriveBackups();
+        let fileId = driveBundle.primaryFileId || null;
 
-        // 드라이브 기존본 + 이 기기 데이터를 합침
-        // (금액이 더 큰 달을 남김 → 모바일 6월이 드라이브 0원 6월을 덮어씀)
-        let mergedSchema = [...state.items];
-        let mergedData = { ...state.data };
-        let driveMonthsBefore = [];
-        if (fileId) {
-            try {
-                const existing = await downloadDriveBackupPayload(fileId);
-                driveMonthsBefore = summarizeExpenseMonths(existing.data);
-                mergedSchema = mergeItemSchema(existing.schema || [], state.items);
-                // 기준=드라이브, 덮어쓸 후보=이 기기 → 기기 쪽 금액이 크거나 같으면 기기 값 채택
-                mergedData = mergeExpenseData(existing.data || {}, state.data);
-            } catch (mergeErr) {
-                console.warn("기존 드라이브 백업 병합 중 경고:", mergeErr);
-            }
-        }
+        const driveMonthsBefore = summarizeExpenseMonths(driveBundle.data);
+        let mergedSchema = mergeItemSchema(driveBundle.schema || [], state.items);
+        let mergedData = mergeExpenseData(driveBundle.data || {}, state.data);
 
         const backupPayload = {
             schema: mergedSchema,
@@ -1463,11 +1517,11 @@ async function backupDataToGoogleDrive() {
         alert(
             "구글 드라이브 백업 완료!\n\n" +
             `이 기기 월: ${localMonths.length ? localMonths.join(", ") : "(없음)"}\n` +
+            `드라이브 파일 수: ${driveBundle.files.length}\n` +
             `드라이브에 있던 월: ${driveMonthsBefore.length ? driveMonthsBefore.join(", ") : "(없음/신규)"}\n` +
             `합친 뒤 저장된 월: ${monthList.length ? monthList.join(", ") : "(금액 있는 월 없음)"}\n` +
             `주소: ${location.origin}\n` +
-            "파일명: smart_expense_data.json\n\n" +
-            "drive.google.com 에서 파일을 열어 6월 합계를 확인해 주세요."
+            "파일명: smart_expense_data.json"
         );
     } catch (err) {
         console.error("구글 드라이브 백업 도중 오류 발생:", err);
@@ -1496,21 +1550,24 @@ async function restoreDataFromGoogleDrive() {
     if (statusBadge) statusBadge.textContent = "복원 진행 중...";
 
     try {
-        const files = await listDriveBackupFiles();
-        if (!files.length) {
+        const driveBundle = await loadAndMergeAllDriveBackups();
+        if (!driveBundle.files.length) {
             alert(
                 "구글 드라이브에서 'smart_expense_data.json' 을 찾지 못했습니다.\n\n" +
                 "확인 방법:\n" +
                 "1) drive.google.com 검색창에 smart_expense_data 입력\n" +
-                "2) 휴지통도 확인\n" +
-                "3) 파일이 있으면 열어 2026-06 금액이 있는지 확인\n" +
-                "4) 예전에 덮어썼다면 파일 → 버전 관리에서 이전 버전 복원"
+                "2) 같은 이름 파일이 여러 개면 모두 확인\n" +
+                "3) 휴지통 / 버전 관리도 확인\n\n" +
+                "참고: 앱은 '앱이 만든 파일'만 읽을 수 있습니다.\n" +
+                "직접 업로드한 JSON이면 앱에서 다시 백업해야 합니다."
             );
             return;
         }
 
-        const file = files[0];
-        const restoredPayload = await downloadDriveBackupPayload(file.id);
+        const restoredPayload = {
+            schema: driveBundle.schema,
+            data: driveBundle.data,
+        };
         const beforeMonths = summarizeExpenseMonths(state.data);
         const driveMonths = summarizeExpenseMonths(restoredPayload.data);
 
@@ -1518,16 +1575,19 @@ async function restoreDataFromGoogleDrive() {
 
         const afterMonths = summarizeExpenseMonths(state.data);
         const added = afterMonths.filter((m) => !beforeMonths.includes(m));
+        const fileSummary = formatDriveFileSummary(driveBundle.perFile);
 
         alert(
             "드라이브 복원(합치기) 완료!\n\n" +
-            `드라이브에 있던 월: ${driveMonths.length ? driveMonths.join(", ") : "(금액 없음)"}\n` +
+            `찾은 백업 파일: ${driveBundle.files.length}개\n` +
+            `${fileSummary}\n\n` +
+            `합친 드라이브 월: ${driveMonths.length ? driveMonths.join(", ") : "(금액 없음)"}\n` +
             `새로 추가된 월: ${added.length ? added.join(", ") : "(없음)"}\n` +
             `현재 보유 월: ${afterMonths.length ? afterMonths.join(", ") : "(없음)"}\n\n` +
             (driveMonths.includes("2026-06")
-                ? "6월 데이터가 드라이브에 있어 합쳐졌습니다."
-                : "주의: 드라이브 최신 백업에 6월 금액이 없습니다.\n" +
-                  "drive.google.com 에서 파일 → 버전 관리로 예전 백업을 확인해 주세요.")
+                ? "6월 데이터가 합쳐졌습니다."
+                : "주의: 앱이 읽을 수 있는 백업에는 6월 금액이 없습니다.\n" +
+                  "모바일에서 새로고침 후 다시 '드라이브 백업'을 눌러 주세요.")
         );
     } catch (err) {
         console.error("구글 드라이브 복원 도중 오류 발생:", err);
