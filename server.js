@@ -167,8 +167,11 @@ const server = http.createServer(async (req, res) => {
 
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
+    const url = `http://127.0.0.1:${PORT}/index.html`;
     console.error(`[ERROR] Port ${PORT} is already in use.`);
-    console.error("Close the other program using that port, then try again.");
+    console.error("Opening the existing server in your browser...");
+    openBrowser(url);
+    console.error("If the page does not load, close other start.bat windows and retry.");
   } else {
     console.error("[ERROR] Failed to start server:", err.message);
   }
@@ -178,13 +181,13 @@ server.on("error", (err) => {
 // localhost / 127.0.0.1 모두 접속 가능하도록 모든 인터페이스에 바인딩
 server.listen(PORT, "0.0.0.0", () => {
   ensureStore();
-  const url = `http://localhost:${PORT}/index.html`;
+  const url = `http://127.0.0.1:${PORT}/index.html`;
   console.log("");
   console.log("  ========================================");
   console.log("   Smart Expense Tracker");
   console.log("  ========================================");
   console.log(`  Server: ${url}`);
-  console.log(`  Also:   http://127.0.0.1:${PORT}/index.html`);
+  console.log(`  Also:   http://localhost:${PORT}/index.html`);
   console.log("  Shared store: data/store.json");
   console.log("  Keep this window open while using the app.");
   console.log("  Press Ctrl+C to stop.");
