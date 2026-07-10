@@ -1190,9 +1190,11 @@ async function initGoogleApi() {
         });
         
         // GIS(Google Identity Services) 토큰 클라이언트 초기화
+        // drive.file 은 '이 앱이 만든 파일'만 보여서 PC/모바일 간 복원이 실패함
+        // → 드라이브 전체에서 smart_expense_data.json 을 찾고 합치기 위해 drive 권한 사용
         state.google.tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: state.google.clientId,
-            scope: 'https://www.googleapis.com/auth/drive.file', // 앱이 생성한 파일에만 안전하게 접근 가능
+            scope: "https://www.googleapis.com/auth/drive",
             callback: (response) => {
                 if (response.error !== undefined) {
                     alert("구글 로그인 승인 중 오류가 발생했습니다: " + response.error);
@@ -1205,6 +1207,7 @@ async function initGoogleApi() {
                 const expiresInSec = response.expires_in ? Number(response.expires_in) : 3600;
                 localStorage.setItem("google_access_token", response.access_token);
                 localStorage.setItem("google_token_expiry", String(Date.now() + expiresInSec * 1000));
+                localStorage.setItem("google_drive_scope", "drive");
 
                 // 백업/복원 원활한 가동을 위한 토큰 헤더 셋업
                 gapi.client.setToken(response);
@@ -1264,6 +1267,18 @@ function handleGoogleAuth() {
 
     showSaveStatus("구글 로그인 창을 여는 중...");
 
+    // 예전 drive.file 권한 토큰이면 폐기 후 새 권한으로 재로그인
+    const savedScope = localStorage.getItem("google_drive_scope");
+    if (savedScope !== "drive") {
+        localStorage.removeItem("google_access_token");
+        localStorage.removeItem("google_token_expiry");
+        state.google.accessToken = null;
+        state.google.isAuthenticated = false;
+        if (typeof gapi !== "undefined" && gapi.client) {
+            gapi.client.setToken(null);
+        }
+    }
+
     if (!state.google.tokenClient) {
         initGoogleApi().then(() => {
             if (state.google.tokenClient) {
@@ -1273,12 +1288,12 @@ function handleGoogleAuth() {
                     "구글 API 초기화에 실패했습니다.\n\n" +
                     "1) API 연동 설정의 Client ID가 올바른지\n" +
                     "2) 구글 콘솔 승인된 자바스크립트 원본에\n" +
-                    "   http://localhost:5500 이 등록됐는지 확인하세요."
+                    "   http://localhost:5500 과 https://mrsure1.github.io 이 등록됐는지 확인하세요."
                 );
             }
         });
     } else {
-        // 이미 토큰 클라이언트가 있으면 바로 로그인 요청 창 띄움
+        // 권한 변경을 반영하려면 consent 화면을 다시 띄움
         state.google.tokenClient.requestAccessToken({ prompt: "consent" });
     }
 }
@@ -1330,7 +1345,7 @@ function updateGoogleLoginUI() {
     }
 }
 
-// 드라이브에서 백업 파일 목록 조회 (앱이 만든 파일만 drive.file 권한으로 보임)
+// 드라이브에서 백업 파일 목록 조회 (같은 이름 파일 전부 검색)
 async function listDriveBackupFiles() {
     const response = await gapi.client.drive.files.list({
         q: "name = 'smart_expense_data.json' and trashed = false",
@@ -1339,6 +1354,7 @@ async function listDriveBackupFiles() {
         orderBy: "modifiedTime desc",
         spaces: "drive",
         corpora: "user",
+        includeItemsFromAllDrives: false,
     });
     return response.result.files || [];
 }
@@ -1577,12 +1593,13 @@ async function restoreDataFromGoogleDrive() {
         if (!driveBundle.files.length) {
             alert(
                 "구글 드라이브에서 'smart_expense_data.json' 을 찾지 못했습니다.\n\n" +
-                "확인 방법:\n" +
-                "1) drive.google.com 검색창에 smart_expense_data 입력\n" +
-                "2) 같은 이름 파일이 여러 개면 모두 확인\n" +
-                "3) 휴지통 / 버전 관리도 확인\n\n" +
-                "참고: 앱은 '앱이 만든 파일'만 읽을 수 있습니다.\n" +
-                "직접 업로드한 JSON이면 앱에서 다시 백업해야 합니다."
+                "해결 방법:\n" +
+                "1) 로그아웃 후 다시 구글 로그인\n" +
+                "   (드라이브 전체 접근 권한을 새로 허용해야 합니다)\n" +
+                "2) 권한 화면에서 드라이브 접근을 허용\n" +
+                "3) 그다음 다시 '드라이브 복원'\n\n" +
+                "그래도 안 되면 drive.google.com 에서\n" +
+                "smart_expense_data 파일이 같은 구글 계정에 있는지 확인하세요."
             );
             return;
         }
