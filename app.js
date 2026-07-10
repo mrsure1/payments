@@ -734,7 +734,9 @@ function setupEventListeners() {
 // ==========================================================================
 
 // 현재 화면의 모든 Input 값을 객체 구조로 수집하여 상태 메모리에 임시 기록합니다.
-function saveCurrentInputsToMemory() {
+// force=false(기본): 화면이 전부 0인데 기존 달에 금액이 있으면 덮어쓰지 않음
+// (월만 스쳐도 자동저장 때문에 6월 등이 0원으로 날아가는 사고 방지)
+function saveCurrentInputsToMemory({ force = false } = {}) {
     const inputs = document.querySelectorAll(".expense-input");
     const monthData = {};
     
@@ -744,8 +746,15 @@ function saveCurrentInputsToMemory() {
         const numValue = parseInt(rawValue, 10) || 0;
         monthData[item] = numValue;
     });
+
+    const newSum = monthExpenseSum(monthData);
+    const oldSum = monthExpenseSum(state.data[state.currentMonth]);
+    if (!force && newSum === 0 && oldSum > 0) {
+        return false;
+    }
     
     state.data[state.currentMonth] = monthData;
+    return true;
 }
 
 // 메모리의 월별 데이터를 LocalStorage + 공유 저장소에 즉시 반영합니다.
@@ -763,7 +772,8 @@ function monthHasExpense(monthData) {
 
 // 현재 입력 데이터를 LocalStorage에 영구 저장합니다.
 function saveCurrentInputsToStorage() {
-    saveCurrentInputsToMemory();
+    // 저장 버튼은 사용자가 의도한 값이므로 0원이어도 강제 반영
+    saveCurrentInputsToMemory({ force: true });
     persistExpenseData();
     
     // 저장 알림 표시 및 피드백 애니메이션
