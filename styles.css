@@ -346,13 +346,92 @@ body.light-theme #theme-toggle .moon-icon {
     transform: translateY(0);
 }
 
-/* 테이블 영역 */
+/* 테이블 영역 - 가능한 한 많은 항목이 보이도록 크게 */
 .table-container {
     flex: 1;
     overflow-y: auto;
-    max-height: 400px;
+    min-height: 420px;
+    max-height: min(78vh, 920px);
     border-radius: var(--border-radius-md);
     border: 1px solid var(--card-border);
+}
+
+/* 카테고리별 합계 요약 스트립 */
+.category-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 12px;
+}
+
+.category-summary:empty {
+    display: none;
+}
+
+.category-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    font-size: 0.85rem;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+}
+
+.category-chip-name {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.category-chip-sum {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.category-chip.is-insurance {
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.category-chip.is-card {
+    border-color: rgba(99, 102, 241, 0.35);
+}
+
+.category-chip.is-loan {
+    border-color: rgba(245, 158, 11, 0.35);
+}
+
+/* 테이블 내 카테고리 구분 헤더 */
+.expense-table tr.category-row td {
+    background: rgba(99, 102, 241, 0.08);
+    border-bottom: 1px solid var(--card-border);
+    padding: 10px 16px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    position: sticky;
+    top: 42px;
+    z-index: 9;
+    word-break: keep-all;
+}
+
+body.light-theme .expense-table tr.category-row td {
+    background: rgba(79, 70, 229, 0.08);
+}
+
+.category-row-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.category-row-sum {
+    color: var(--accent-color);
+    font-variant-numeric: tabular-nums;
 }
 
 .expense-table {

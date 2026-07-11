@@ -78,6 +78,9 @@
                     </button>
                 </form>
 
+    <!-- 카테고리별 합계 요약 -->
+                <div id="category-summary" class="category-summary" aria-live="polite"></div>
+
                 <!-- 지출 항목 입력 테이블 -->
                 <div class="table-container">
                     <table class="expense-table">
@@ -156,7 +159,7 @@
                             <span class="status-badge disconnect-badge" id="drive-status">연결 해제됨</span>
                         </div>
                         <div class="drive-sync-content">
-                            <p class="drive-desc">PC·휴대폰 데이터를 맞출 때: 금액이 있는 기기에서 먼저 <strong>드라이브 백업</strong> → 다른 기기에서 <strong>드라이브 복원</strong>. (서로 다른 월은 합쳐집니다)</p>
+                            <p class="drive-desc">한 번만 구글 로그인하면, 이후에는 입력할 때마다 <strong>자동으로 드라이브에 동기화</strong>됩니다. (백업/복원 버튼을 매번 누를 필요 없음)</p>
                             <div class="drive-actions">
                                 <button id="google-login-btn" class="google-btn">
                                     <i data-lucide="log-in"></i>
@@ -248,6 +251,6 @@
     </div>
 
     <!-- 비즈니스 로직 스크립트 로드 (버전 쿼리로 모바일 캐시 강제 갱신) -->
-    <script src="app.js?v=20260710-drive3"></script>
+    <script src="app.js?v=20260711-auto1"></script>
 </body>
 </html>

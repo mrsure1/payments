@@ -303,48 +303,91 @@ function renderExpenseList() {
     
     // 현재 월의 데이터 객체 가져오기 (없으면 빈 객체)
     const monthData = state.data[state.currentMonth] || {};
-    
-    state.items.forEach((item) => {
-        const tr = document.createElement("tr");
-        // 드래그 앤 드롭 제어를 위해 항상 draggable="true"로 설정
-        tr.setAttribute("draggable", "true");
-        tr.setAttribute("data-item-name", item);
-        
-        // 해당 항목의 금액 (없으면 0 또는 빈 칸으로 노출할 수 있으나, 0원으로 기본값 설정)
-        const amount = monthData[item] !== undefined ? monthData[item] : 0;
-        const formattedAmount = formatNumberWithCommas(amount);
-        
-        tr.innerHTML = `
-            <td style="text-align: center; vertical-align: middle;">
-                <div class="drag-handle" aria-label="순서 조정 핸들">
-                    <i data-lucide="grip-vertical"></i>
+    const grouped = groupItemsByCategory(state.items);
+
+    grouped.forEach(({ category, items }) => {
+        const catSum = items.reduce((acc, item) => acc + (Number(monthData[item]) || 0), 0);
+        const headerTr = document.createElement("tr");
+        headerTr.className = "category-row";
+        headerTr.setAttribute("draggable", "false");
+        headerTr.innerHTML = `
+            <td colspan="4">
+                <div class="category-row-label">
+                    <span>${escapeHtml(category)}</span>
+                    <span class="category-row-sum">${formatNumberWithCommas(catSum)}원</span>
                 </div>
-            </td>
-            <td><span class="expense-item-name" data-item-name="${escapeHtml(item)}" title="클릭하여 항목명 수정">${escapeHtml(item)}</span></td>
-            <td>
-                <div class="expense-input-wrapper">
-                    <input type="text" 
-                           class="expense-input" 
-                           data-item="${escapeHtml(item)}" 
-                           value="${formattedAmount === "0" ? "" : formattedAmount}" 
-                           placeholder="0">
-                    <span class="input-suffix">원</span>
-                </div>
-            </td>
-            <td>
-                <button type="button" class="delete-btn" data-item="${escapeHtml(item)}" aria-label="삭제">
-                    <i data-lucide="trash-2"></i>
-                </button>
             </td>
         `;
-        listContainer.appendChild(tr);
+        listContainer.appendChild(headerTr);
+
+        items.forEach((item) => {
+            const tr = document.createElement("tr");
+            // 드래그 앤 드롭 제어를 위해 항상 draggable="true"로 설정
+            tr.setAttribute("draggable", "true");
+            tr.setAttribute("data-item-name", item);
+            
+            // 해당 항목의 금액 (없으면 0 또는 빈 칸으로 노출할 수 있으나, 0원으로 기본값 설정)
+            const amount = monthData[item] !== undefined ? monthData[item] : 0;
+            const formattedAmount = formatNumberWithCommas(amount);
+            
+            tr.innerHTML = `
+                <td style="text-align: center; vertical-align: middle;">
+                    <div class="drag-handle" aria-label="순서 조정 핸들">
+                        <i data-lucide="grip-vertical"></i>
+                    </div>
+                </td>
+                <td><span class="expense-item-name" data-item-name="${escapeHtml(item)}" title="클릭하여 항목명 수정">${escapeHtml(item)}</span></td>
+                <td>
+                    <div class="expense-input-wrapper">
+                        <input type="text" 
+                               class="expense-input" 
+                               data-item="${escapeHtml(item)}" 
+                               value="${formattedAmount === "0" ? "" : formattedAmount}" 
+                               placeholder="0">
+                        <span class="input-suffix">원</span>
+                    </div>
+                </td>
+                <td>
+                    <button type="button" class="delete-btn" data-item="${escapeHtml(item)}" aria-label="삭제">
+                        <i data-lucide="trash-2"></i>
+                    </button>
+                </td>
+            `;
+            listContainer.appendChild(tr);
+        });
     });
     
+    renderCategorySummary(monthData);
+
     // 새로 렌더링된 요소에 대해 Lucide 아이콘 및 지출 입력 이벤트 핸들링 바인딩
     lucide.createIcons();
     bindExpenseInputs();
     bindItemNameEdit();      // 항목명 클릭 인라인 편집 이벤트 바인딩 추가
     bindExpenseDragEvents(); // 드래그 앤 드롭 정렬 이벤트 바인딩 추가
+}
+
+// 카테고리별 합계 칩 렌더링
+function renderCategorySummary(monthData) {
+    const box = document.getElementById("category-summary");
+    if (!box) return;
+
+    const grouped = groupItemsByCategory(state.items);
+    box.innerHTML = grouped.map(({ category, items }) => {
+        const sum = items.reduce((acc, item) => acc + (Number(monthData[item]) || 0), 0);
+        const cls = category === "보험"
+            ? "is-insurance"
+            : category === "카드"
+                ? "is-card"
+                : category === "대출"
+                    ? "is-loan"
+                    : "";
+        return `
+            <div class="category-chip ${cls}">
+                <span class="category-chip-name">${escapeHtml(category)}</span>
+                <span class="category-chip-sum">${formatNumberWithCommas(sum)}원</span>
+            </div>
+        `;
+    }).join("");
 }
 
 // 과거에 저장한 월별 내역 리스트 렌더링
@@ -448,6 +491,19 @@ function bindExpenseInputs() {
             // 입력할 때마다 메모리 + 로컬스토리지에 자동 저장 (새로고침해도 유지)
             saveCurrentInputsToMemory();
             persistExpenseData();
+            renderCategorySummary(state.data[state.currentMonth] || {});
+            // 카테고리 헤더 합계도 갱신
+            document.querySelectorAll(".category-row").forEach((row) => {
+                const label = row.querySelector(".category-row-label span");
+                const sumEl = row.querySelector(".category-row-sum");
+                if (!label || !sumEl) return;
+                const cat = label.textContent;
+                const grouped = groupItemsByCategory(state.items).find((g) => g.category === cat);
+                if (!grouped) return;
+                const monthData = state.data[state.currentMonth] || {};
+                const sum = grouped.items.reduce((acc, item) => acc + (Number(monthData[item]) || 0), 0);
+                sumEl.textContent = `${formatNumberWithCommas(sum)}원`;
+            });
             updateCharts();
         });
         
@@ -770,6 +826,120 @@ function persistExpenseData() {
     localStorage.setItem("expense_data", JSON.stringify(state.data));
     // 공유 저장소는 비동기 반영 (입력 반응성 유지)
     pushSharedStore();
+    // 구글 로그인 상태면 드라이브에도 자동 백업 (디바운스)
+    scheduleAutoDriveSync();
+}
+
+let autoDriveSyncTimer = null;
+let autoDriveSyncInFlight = false;
+
+function scheduleAutoDriveSync() {
+    if (!state.google.isAuthenticated) return;
+    if (localStorage.getItem("google_drive_scope") !== "drive") return;
+    clearTimeout(autoDriveSyncTimer);
+    autoDriveSyncTimer = setTimeout(() => {
+        autoSyncToGoogleDrive({ silent: true });
+    }, 1800);
+}
+
+// 조용한 자동 동기화: 드라이브 ↔ 로컬 합친 뒤 업로드
+async function autoSyncToGoogleDrive({ silent = true, pullFirst = false } = {}) {
+    if (!state.google.isAuthenticated || !state.google.accessToken) return false;
+    if (autoDriveSyncInFlight) return false;
+    if (typeof gapi === "undefined" || !gapi.client) return false;
+
+    autoDriveSyncInFlight = true;
+    try {
+        if (pullFirst) {
+            const driveBundle = await loadAndMergeAllDriveBackups();
+            if (driveBundle.files.length) {
+                applyRestoredData(
+                    { schema: driveBundle.schema, data: driveBundle.data },
+                    { merge: true }
+                );
+            }
+        }
+
+        saveCurrentInputsToMemory();
+        const driveBundle = await loadAndMergeAllDriveBackups();
+        let fileId = driveBundle.primaryFileId || null;
+        let mergedSchema = mergeItemSchema(driveBundle.schema || [], state.items);
+        let mergedData = mergeExpenseData(driveBundle.data || {}, state.data);
+
+        const backupPayload = {
+            schema: mergedSchema,
+            data: mergedData,
+            lastUpdated: new Date().toISOString(),
+            source: location.origin,
+            auto: true,
+        };
+        const fileContent = JSON.stringify(backupPayload, null, 2);
+
+        if (fileId) {
+            await gapi.client.request({
+                path: `/upload/drive/v3/files/${fileId}`,
+                method: "PATCH",
+                params: { uploadType: "media" },
+                headers: { "Content-Type": "application/json" },
+                body: fileContent,
+            });
+            for (const dup of driveBundle.files.slice(1)) {
+                try {
+                    await gapi.client.drive.files.update({
+                        fileId: dup.id,
+                        resource: { trashed: true },
+                    });
+                } catch (_) { /* ignore */ }
+            }
+        } else {
+            const metadata = {
+                name: "smart_expense_data.json",
+                mimeType: "application/json",
+            };
+            const boundary = "314159265358979323846";
+            const delimiter = "\r\n--" + boundary + "\r\n";
+            const close_delim = "\r\n--" + boundary + "--";
+            const multipartRequestBody =
+                delimiter +
+                "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+                JSON.stringify(metadata) +
+                delimiter +
+                "Content-Type: application/json\r\n\r\n" +
+                fileContent +
+                close_delim;
+
+            await gapi.client.request({
+                path: "/upload/drive/v3/files",
+                method: "POST",
+                params: { uploadType: "multipart" },
+                headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+                body: multipartRequestBody,
+            });
+        }
+
+        state.items = mergedSchema;
+        state.data = mergedData;
+        persistLocalMirror();
+        await pushSharedStore();
+        if (!silent) {
+            renderAll();
+            updateCharts();
+        } else {
+            renderHistoryList();
+            renderCategorySummary(state.data[state.currentMonth] || {});
+        }
+        showSaveStatus("드라이브 자동 동기화 완료");
+        return true;
+    } catch (err) {
+        console.warn("자동 드라이브 동기화 실패:", err);
+        if (!silent) {
+            alert("자동 동기화 실패: " + (err.result?.error?.message || err.message));
+        }
+        return false;
+    } finally {
+        autoDriveSyncInFlight = false;
+        updateGoogleLoginUI();
+    }
 }
 
 // 해당 월에 실제 지출(0원 초과)이 있는지 확인
@@ -1123,6 +1293,42 @@ function getCategoryFromItemName(itemName) {
     return itemName.trim();
 }
 
+// 화면 구분용 대분류 (카드 / 보험 / 대출 / 기타·세부카테고리)
+function getExpenseGroup(itemName) {
+    const raw = (itemName || "").trim();
+    const prefix = getCategoryFromItemName(raw);
+
+    if (/카드/.test(raw) || /카드$/.test(prefix)) return "카드";
+    if (/^보험/.test(raw) || /^보험/.test(prefix)) return "보험";
+    if (/^대출/.test(raw) || /^대출/.test(prefix)) return "대출";
+
+    // 괄호형 세부 카테고리 (예: 통신(SKT))는 앞부분을 그룹으로
+    if (prefix && prefix !== raw) return prefix;
+    return "기타";
+}
+
+const CATEGORY_ORDER = ["카드", "보험", "대출", "기타"];
+
+function groupItemsByCategory(items) {
+    const map = new Map();
+    (items || []).forEach((item) => {
+        const cat = getExpenseGroup(item);
+        if (!map.has(cat)) map.set(cat, []);
+        map.get(cat).push(item);
+    });
+
+    const keys = Array.from(map.keys()).sort((a, b) => {
+        const ia = CATEGORY_ORDER.indexOf(a);
+        const ib = CATEGORY_ORDER.indexOf(b);
+        const sa = ia === -1 ? 100 : ia;
+        const sb = ib === -1 ? 100 : ib;
+        if (sa !== sb) return sa - sb;
+        return a.localeCompare(b, "ko");
+    });
+
+    return keys.map((category) => ({ category, items: map.get(category) }));
+}
+
 // 카테고리 도넛 차트에 사용할 색상 팔레트 (항목 수가 많을 경우 순환 사용)
 const CHART_PALETTE = [
     '#6366f1', '#a855f7', '#ec4899', '#f43f5e',
@@ -1220,6 +1426,11 @@ async function initGoogleApi() {
                 updateGoogleLoginUI();
                 if (fullDrive) {
                     showSaveStatus("구글 드라이브 연동에 성공했습니다.");
+                    // 로그인 직후 드라이브에서 자동으로 가져와 합침
+                    autoSyncToGoogleDrive({ silent: true, pullFirst: true }).then(() => {
+                        renderAll();
+                        updateCharts();
+                    });
                 } else {
                     showSaveStatus("권한 부족: 다시 로그인 필요");
                     alert(
@@ -1240,10 +1451,24 @@ async function initGoogleApi() {
             state.google.isAuthenticated = true;
             gapi.client.setToken({ access_token: savedToken });
             updateGoogleLoginUI();
+            // 저장된 세션이면 조용히 드라이브와 맞춤
+            if (localStorage.getItem("google_drive_scope") === "drive") {
+                setTimeout(() => {
+                    autoSyncToGoogleDrive({ silent: true, pullFirst: true }).then(() => {
+                        renderAll();
+                        updateCharts();
+                    });
+                }, 400);
+            }
         } else if (savedToken) {
-            // 이미 만료된 토큰은 정리
+            // 만료된 토큰: 조용히 재발급 시도 (동의 화면 없이)
             localStorage.removeItem("google_access_token");
             localStorage.removeItem("google_token_expiry");
+            if (state.google.tokenClient) {
+                try {
+                    state.google.tokenClient.requestAccessToken({ prompt: "" });
+                } catch (_) { /* ignore */ }
+            }
         }
 
         console.log("구글 API 및 GIS SDK 초기화가 완료되었습니다.");
@@ -1343,7 +1568,8 @@ function updateGoogleLoginUI() {
 
     if (state.google.isAuthenticated) {
         if (driveStatus) {
-            driveStatus.textContent = "연결됨";
+            const autoOn = localStorage.getItem("google_drive_scope") === "drive";
+            driveStatus.textContent = autoOn ? "자동 동기화" : "연결됨";
             driveStatus.className = "status-badge connect-badge";
         }
         if (loginBtn) loginBtn.classList.add("hidden");
